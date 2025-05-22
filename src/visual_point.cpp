@@ -59,14 +59,18 @@ bool VisualPoint::getCloseViewObs(const Vector3d &framepos, Feature *&ftr, const
   // TODO: get frame with same point of view AND same pyramid level!
   if (obs_.size() <= 0) return false;
 
-  Vector3d obs_dir(framepos - pos_);
+  Eigen::Vector3d obs_dir(framepos - pos_); // 地图点指向当前相机的单位方向向量
   obs_dir.normalize();
+
   auto min_it = obs_.begin();
   double min_cos_angle = 0;
+  // 对每个观测特征，获取其对应帧的相机中心位置，计算地图点看向该帧的方向向量
   for (auto it = obs_.begin(), ite = obs_.end(); it != ite; ++it)
   {
-    Vector3d dir((*it)->T_f_w_.inverse().translation() - pos_);
+    Eigen::Vector3d dir((*it)->T_f_w_.inverse().translation() - pos_);
     dir.normalize();
+
+    // 夹角余弦最大值
     double cos_angle = obs_dir.dot(dir);
     if (cos_angle > min_cos_angle)
     {
@@ -74,7 +78,8 @@ bool VisualPoint::getCloseViewObs(const Vector3d &framepos, Feature *&ftr, const
       min_it = it;
     }
   }
-  ftr = *min_it;
+
+  ftr = *min_it; // 可能的最佳观测特征
 
   // Vector2d ftr_px = ftr->px_;
   // double pixel_dist = (cur_px-ftr_px).norm();
@@ -84,7 +89,10 @@ bool VisualPoint::getCloseViewObs(const Vector3d &framepos, Feature *&ftr, const
   //   ROS_ERROR("The pixel dist exceeds 200.");
   //   return false;
   // }
+  
+  // cos_angle 越接近 1 → 夹角越小 → 视角越接近当前帧
 
+  // 舍弃夹角大于 60的情况
   if (min_cos_angle < 0.5) // assume that observations larger than 60° are useless 0.5
   {
     // ROS_ERROR("The obseved angle is larger than 60°.");

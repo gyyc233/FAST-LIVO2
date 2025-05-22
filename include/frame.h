@@ -20,50 +20,51 @@ class VisualPoint;
 struct Feature;
 
 typedef list<Feature *> Features;
-typedef vector<cv::Mat> ImgPyr;
+typedef std::vector<cv::Mat> ImgPyr;
 
 /// A frame saves the image, the associated features and the estimated pose.
+/// 保存图像，相关特征与估计的位姿
 class Frame : boost::noncopyable
 {
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  static int frame_counter_; //!< Counts the number of created frames. Used to set the unique id.
+  static int frame_counter_; //!< Counts the number of created frames. Used to set the unique id. frames Frame 实例化数量
   int id_;                   //!< Unique id of the frame.
-  vk::AbstractCamera *cam_;  //!< Camera model.
-  SE3 T_f_w_;                //!< Transform (f)rame from (w)orld.
-  SE3 T_f_w_prior_;          //!< Transform (f)rame from (w)orld provided by the IMU prior.
+  vk::AbstractCamera *cam_;  //!< Camera model. 相机模型指针
+  Sophus::SE3 T_f_w_;                //!< Transform (f)rame from (w)orld. 当前帧相对于世界坐标系的估计位姿（优化后）
+  SophusSE3 T_f_w_prior_;          //!< Transform (f)rame from (w)orld provided by the IMU prior. 来自 IMU 的当前帧相对于世界坐标系的先验位姿（IMU 预积分提供）
   cv::Mat img_;              //!< Image of the frame.
-  Features fts_;             //!< List of features in the image.
+  Features fts_;             //!< List of features in the image. 该帧提取出的所有视觉特征点
 
   Frame(vk::AbstractCamera *cam, const cv::Mat &img);
   ~Frame();
 
-  /// Initialize new frame and create image pyramid.
+  /// Initialize new frame and create image pyramid. 创建图像金字塔
   void initFrame(const cv::Mat &img);
 
-  /// Return number of point observations.
+  /// Return number of point observations. 该帧视觉特征点数量
   inline size_t nObs() const { return fts_.size(); }
 
-  /// Transforms point coordinates in world-frame (w) to camera pixel coordinates (c).
+  /// Transforms point coordinates in world-frame (w) to camera pixel coordinates (c). 将一个点从 世界坐标系转换到 当前帧的像素坐标系
   inline Vector2d w2c(const Vector3d &xyz_w) const { return cam_->world2cam(T_f_w_ * xyz_w); }
 
-  /// Transforms point coordinates in world-frame (w) to camera pixel coordinates (c) using the IMU prior pose.
+  /// Transforms point coordinates in world-frame (w) to camera pixel coordinates (c) using the IMU prior pose. 将一个点从 世界坐标系（IMU 提供的先验位姿）转换到 当前帧的像素坐标系
   inline Vector2d w2c_prior(const Vector3d &xyz_w) const { return cam_->world2cam(T_f_w_prior_ * xyz_w); }
   
-  /// Transforms pixel coordinates (c) to frame unit sphere coordinates (f).
+  /// Transforms pixel coordinates (c) to frame unit sphere coordinates (f). 像素坐标转相机单位球坐标
   inline Vector3d c2f(const Vector2d &px) const { return cam_->cam2world(px[0], px[1]); }
 
-  /// Transforms pixel coordinates (c) to frame unit sphere coordinates (f).
+  /// Transforms pixel coordinates (c) to frame unit sphere coordinates (f). 像素坐标转相机单位球坐标
   inline Vector3d c2f(const double x, const double y) const { return cam_->cam2world(x, y); }
 
-  /// Transforms point coordinates in world-frame (w) to camera-frams (f).
+  /// Transforms point coordinates in world-frame (w) to camera-frams (f). 世界坐标转相机坐标
   inline Vector3d w2f(const Vector3d &xyz_w) const { return T_f_w_ * xyz_w; }
 
-  /// Transforms point from frame unit sphere (f) frame to world coordinate frame (w).
+  /// Transforms point from frame unit sphere (f) frame to world coordinate frame (w). 相机单位球坐标转世界坐标
   inline Vector3d f2w(const Vector3d &f) const { return T_f_w_.inverse() * f; }
 
-  /// Projects Point from unit sphere (f) in camera pixels (c).
+  /// Projects Point from unit sphere (f) in camera pixels (c).  相机单位球坐标转像素坐标
   inline Vector2d f2c(const Vector3d &f) const { return cam_->world2cam(f); }
 
   /// Return the pose of the frame in the (w)orld coordinate frame.
