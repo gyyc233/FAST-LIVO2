@@ -96,6 +96,7 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
+SET(Sophus_DIR /home/V01/uids0025/src/Sophus/build) # 改为自己的安装路径
 find_package(Sophus REQUIRED)
 find_package(Boost REQUIRED COMPONENTS thread)
 
