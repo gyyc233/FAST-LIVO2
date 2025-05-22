@@ -27,12 +27,12 @@ using namespace Sophus;
 
 #define print_line std::cout << __FILE__ << ", " << __LINE__ << std::endl;
 #define G_m_s2 (9.81)   // Gravaty const in GuangDong/China
-#define DIM_STATE (19)  // Dimension of states (Let Dim(SO(3)) = 3)
-#define INIT_COV (0.01)
+#define DIM_STATE (19)  // Dimension of states (Let Dim(SO(3)) = 3) 状态向量维度
+#define INIT_COV (0.01) // 初始协方差
 #define SIZE_LARGE (500)
 #define SIZE_SMALL (100)
-#define VEC_FROM_ARRAY(v) v[0], v[1], v[2]
-#define MAT_FROM_ARRAY(v) v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]
+#define VEC_FROM_ARRAY(v) v[0], v[1], v[2] // 数组转 Eigen 向量
+#define MAT_FROM_ARRAY(v) v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8] // 数组转 Eigen 矩阵
 #define DEBUG_FILE_DIR(name) (string(string(ROOT_DIR) + "Log/" + name))
 
 enum LID_TYPE
@@ -44,12 +44,15 @@ enum LID_TYPE
   XT32 = 5,
   PANDAR128 = 6
 };
+
 enum SLAM_MODE
 {
   ONLY_LO = 0,
   ONLY_LIO = 1,
   LIVO = 2
 };
+
+// 控制滤波器在不同模式间切换
 enum EKF_STATE
 {
   WAIT = 0,
@@ -58,10 +61,12 @@ enum EKF_STATE
   LO = 3
 };
 
+// 一个 IMU 时间段内的测量数据，包括 IMU 队列和图像
+// 用于在多传感器融合过程中实现 精确的时间对齐与数据打包
 struct MeasureGroup
 {
-  double vio_time;
-  double lio_time;
+  double vio_time; // 图像时间戳（VIO模式）
+  double lio_time; // LiDAR 时间戳（LIO 模式）
   deque<sensor_msgs::Imu::ConstPtr> imu;
   cv::Mat img;
   MeasureGroup()
@@ -71,17 +76,18 @@ struct MeasureGroup
   };
 };
 
+// LiDAR 扫描帧数据结构
 struct LidarMeasureGroup
 {
-  double lidar_frame_beg_time;
-  double lidar_frame_end_time;
-  double last_lio_update_time;
-  PointCloudXYZI::Ptr lidar;
-  PointCloudXYZI::Ptr pcl_proc_cur;
-  PointCloudXYZI::Ptr pcl_proc_next;
-  deque<struct MeasureGroup> measures;
-  EKF_STATE lio_vio_flg;
-  int lidar_scan_index_now;
+  double lidar_frame_beg_time; // 帧开始时间
+  double lidar_frame_end_time; // 帧结束时间
+  double last_lio_update_time; // 上一次 LIO 更新的时间戳
+  PointCloudXYZI::Ptr lidar; // 原始 LiDAR 点云数据
+  PointCloudXYZI::Ptr pcl_proc_cur; // 当前处理后的点云
+  PointCloudXYZI::Ptr pcl_proc_next; // 下一帧点云缓存
+  deque<struct MeasureGroup> measures; // 包含该 LiDAR 帧期间的所有 IMU 和图像数据组
+  EKF_STATE lio_vio_flg; //模式标志
+  int lidar_scan_index_now; // 当前 LiDAR 扫描帧索引
 
   LidarMeasureGroup()
   {
@@ -98,16 +104,18 @@ struct LidarMeasureGroup
   };
 };
 
+// 带协方差信息的点结构，用于地图点不确定性建模
+// 协方差矩阵 var 和 body_var 用于描述点的位置不确定性
 typedef struct pointWithVar
 {
-  Eigen::Vector3d point_b;     // point in the lidar body frame
-  Eigen::Vector3d point_i;     // point in the imu body frame
-  Eigen::Vector3d point_w;     // point in the world frame
-  Eigen::Matrix3d var_nostate; // the var removed the state covarience
-  Eigen::Matrix3d body_var;
-  Eigen::Matrix3d var;
-  Eigen::Matrix3d point_crossmat;
-  Eigen::Vector3d normal;
+  Eigen::Vector3d point_b;     // point in the lidar body frame LiDAR 本体坐标系下的点位置
+  Eigen::Vector3d point_i;     // point in the imu body frame IMU 本体坐标系下的点位置
+  Eigen::Vector3d point_w;     // point in the world frame 世界坐标系下的点位置
+  Eigen::Matrix3d var_nostate; // the var removed the state covarience 移除系统状态协方差后的点自身协方差
+  Eigen::Matrix3d body_var; // 在 LiDAR 坐标系下的协方差
+  Eigen::Matrix3d var; // 总协方差（可能包含状态估计的影响）
+  Eigen::Matrix3d point_crossmat; // 点的反对称矩阵（用于旋转微分运算）
+  Eigen::Vector3d normal; // 点的法向量（用于平面约束或配准）
   pointWithVar()
   {
     var_nostate = Eigen::Matrix3d::Zero();
@@ -122,6 +130,7 @@ typedef struct pointWithVar
 } pointWithVar;
 
 
+// 表示系统状态估计的核心数据结构，含了一个完整的 LIVO 或 LIO 模块所需的状态变量及其协方差信息
 struct StatesGroup
 {
   StatesGroup()
@@ -163,6 +172,7 @@ struct StatesGroup
     return *this;
   };
 
+  // 状态加法
   StatesGroup operator+(const Matrix<double, DIM_STATE, 1> &state_add)
   {
     StatesGroup a;
@@ -190,9 +200,11 @@ struct StatesGroup
     return *this;
   };
 
+  // 计算两个状态之间测差
+  // [旋转3，位置3，曝光时间1，速度3，陀螺仪bias3,加计bias3，重力3]
   Matrix<double, DIM_STATE, 1> operator-(const StatesGroup &b)
   {
-    Matrix<double, DIM_STATE, 1> a;
+    Eigen::Matrix<double, DIM_STATE, 1> a;
     M3D rotd(b.rot_end.transpose() * this->rot_end);
     a.block<3, 1>(0, 0) = Log(rotd);
     a.block<3, 1>(3, 0) = this->pos_end - b.pos_end;
@@ -211,14 +223,14 @@ struct StatesGroup
     this->vel_end = V3D::Zero();
   }
 
-  M3D rot_end;                              // the estimated attitude (rotation matrix) at the end lidar point
-  V3D pos_end;                              // the estimated position at the end lidar point (world frame)
-  V3D vel_end;                              // the estimated velocity at the end lidar point (world frame)
-  double inv_expo_time;                     // the estimated inverse exposure time (no scale)
-  V3D bias_g;                               // gyroscope bias
-  V3D bias_a;                               // accelerator bias
-  V3D gravity;                              // the estimated gravity acceleration
-  Matrix<double, DIM_STATE, DIM_STATE> cov; // states covariance
+  M3D rot_end; // the estimated rotation matrix at the end lidar point 最终 LiDAR 帧时刻的姿态
+  V3D pos_end; // the estimated position at the end lidar point (world frame) 最终 LiDAR 帧时刻的位置
+  V3D vel_end; // the estimated velocity at the end lidar point (world frame)
+  double inv_expo_time; // the estimated inverse exposure time (no scale) 曝光时间倒数（用于图像亮度建模）
+  V3D bias_g; // gyroscope bias
+  V3D bias_a; // accelerator bias
+  V3D gravity; // the estimated gravity acceleration
+  Eigen::Matrix<double, DIM_STATE, DIM_STATE> cov; // states covariance
 };
 
 template <typename T>
