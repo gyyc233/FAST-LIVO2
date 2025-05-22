@@ -25,6 +25,8 @@ typedef Eigen::Matrix3f M3F;
 #define MF(a, b) Eigen::Matrix<float, (a), (b)>
 #define VF(a) Eigen::Matrix<float, (a), 1>
 
+// 存储在 LiDAR 帧内某个 IMU 测量时刻对应的 预积分状态（preintegrated states）
+// acc, vel, pos, rot 是在 世界坐标系（global frame） 下表示，gyr 是在 IMU 机体坐标系（body frame） 下表示的角速度
 struct Pose6D
 {
   /*** the preintegrated Lidar states at the time of IMU measurements in a frame ***/
