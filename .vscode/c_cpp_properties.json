@@ -1,0 +1,32 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/usr/local/include",
+                "/usr/local/include/glog",
+                "/usr/local/include/gflags",
+                "/usr/local/include/sophus",
+                "/usr/include/pcl-1.10",
+                "/usr/local/include/ceres",
+                "/usr/local/include/g2o",
+                "/usr/local/include/DBoW3",
+                "/usr/local/include/octovis",
+                "/usr/include",
+                "/usr/include/opencv4/opencv2",
+                "/usr/include/eigen3",
+                "/usr/local/include/gtsam",
+                "/opt/ros/noetic/include"
+            ],
+            "defines": [
+                "ROS_CATKIN"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++14",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
