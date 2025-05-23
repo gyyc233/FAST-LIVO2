@@ -33,7 +33,7 @@ public:
   int id_;                   //!< Unique id of the frame.
   vk::AbstractCamera *cam_;  //!< Camera model. 相机模型指针
   Sophus::SE3 T_f_w_;                //!< Transform (f)rame from (w)orld. 当前帧相对于世界坐标系的估计位姿（优化后）
-  SophusSE3 T_f_w_prior_;          //!< Transform (f)rame from (w)orld provided by the IMU prior. 来自 IMU 的当前帧相对于世界坐标系的先验位姿（IMU 预积分提供）
+  Sophus::SE3 T_f_w_prior_;          //!< Transform (f)rame from (w)orld provided by the IMU prior. 来自 IMU 的当前帧相对于世界坐标系的先验位姿（IMU 预积分提供）
   cv::Mat img_;              //!< Image of the frame.
   Features fts_;             //!< List of features in the image. 该帧提取出的所有视觉特征点
 
