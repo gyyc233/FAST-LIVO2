@@ -275,7 +275,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   // printf("[ IMU ] IMU data sequence size: %zu \n", meas.imu.size());
   // printf("[ IMU ] lidar_scan_index_now: %d \n", lidar_meas.lidar_scan_index_now);
 
-  // 当前帧传播结束时间
+  // 当前lidar帧传播结束时间
   const double prop_end_time = lidar_meas.lio_vio_flg == LIO ? meas.lio_time : meas.vio_time;
 
   /*** cut lidar point based on the propagation-start time and required
@@ -326,7 +326,6 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   // cout << "[ IMU ] input state: " << state_inout.vel_end.transpose() << " " << state_inout.pos_end.transpose() << endl;
   M3D R_imu(state_inout.rot_end);
 
-  MD(DIM_STATE, DIM_STATE) F_x, cov_w;
   double dt, dt_all = 0.0;
   double offs_t;
   // double imu_time;
@@ -355,8 +354,8 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
     for (int i = 0; i < v_imu.size() - 1; i++)
     {
       // 遍历每一对imu数据
-      auto head = v_imu[i];
-      auto tail = v_imu[i + 1];
+      auto head = v_imu[i]; // imu 上一帧
+      auto tail = v_imu[i + 1]; // imu 下一帧
 
       if (tail->header.stamp.toSec() < prop_beg_time) continue;
 
@@ -393,21 +392,21 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
       {
         // printf("00 \n");
         // 上一帧结束时间 last_prop_end_time 到当前 tail 时间的间隔作为 dt
-        dt = tail->header.stamp.toSec() - last_prop_end_time;
-        offs_t = tail->header.stamp.toSec() - prop_beg_time;
+        dt = tail->header.stamp.toSec() - last_prop_end_time; // 从上一帧传播结束时间到当前 IMU 数据尾部（tail）的时间差，用于状态传播
+        offs_t = tail->header.stamp.toSec() - prop_beg_time; // 当前 IMU 数据相对于当前lidar帧传播开始时间的时间偏移，用于点云去运动畸变
       }
       else if (i != v_imu.size() - 2) // 当前不是倒数第二个 IMU 数据
       {
         // 2. IMU 数据发生在帧中间
         // printf("11 \n");
         // 使用两个相邻 IMU 时间戳之间的差值作为 dt
-        dt = tail->header.stamp.toSec() - head->header.stamp.toSec();
+        dt = tail->header.stamp.toSec() - head->header.stamp.toSec(); // 相邻两个 IMU 数据之间的时间间隔
         // offs_t 是该 IMU 对应的时间偏移，用于插值和点云去畸变
         offs_t = tail->header.stamp.toSec() - prop_beg_time;
       }
       else
       {
-        // 当前是倒数第二个 IMU，将其对齐到帧尾
+        // 当前是倒数第二个 IMU，将其对齐到lidar帧尾
         // printf("22 \n");
         dt = prop_end_time - head->header.stamp.toSec();
         offs_t = prop_end_time - prop_beg_time;
@@ -421,26 +420,31 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
       M3D Exp_f = Exp(angvel_avr, dt);
       acc_avr_skew << SKEW_SYM_MATRX(acc_avr);
 
-      F_x.setIdentity();
+      // 构造误差状态转移系数矩阵与误差状态协方差矩阵
+      MD(DIM_STATE, DIM_STATE) F_x, cov_w;
+      F_x.setIdentity(); // 单位阵
       cov_w.setZero();
 
-      F_x.block<3, 3>(0, 0) = Exp(angvel_avr, -dt);
-      if (ba_bg_est_en) F_x.block<3, 3>(0, 10) = -Eye3d * dt;
+      // 参考FAST-LIO imu 误差状态转移方程
+      F_x.block<3, 3>(0, 0) = Exp(angvel_avr, -dt); // 角速度对角速度求偏导
+      if (ba_bg_est_en) F_x.block<3, 3>(0, 10) = -Eye3d * dt; // 角速度对陀螺仪bias求偏导
       // F_x.block<3,3>(3,0)  = R_imu * off_vel_skew * dt;
-      F_x.block<3, 3>(3, 7) = Eye3d * dt;
-      F_x.block<3, 3>(7, 0) = -R_imu * acc_avr_skew * dt;
-      if (ba_bg_est_en) F_x.block<3, 3>(7, 13) = -R_imu * dt;
-      if (gravity_est_en) F_x.block<3, 3>(7, 16) = Eye3d * dt;
+      F_x.block<3, 3>(3, 7) = Eye3d * dt; // 位置对速度求偏导
+      F_x.block<3, 3>(7, 0) = -R_imu * acc_avr_skew * dt;// 速度对角速度求偏导
+      if (ba_bg_est_en) F_x.block<3, 3>(7, 13) = -R_imu * dt; // 速度对b_a bias 求偏导
+      if (gravity_est_en) F_x.block<3, 3>(7, 16) = Eye3d * dt; // 速度对重力 求偏导
 
       // tau = 1.0 / (0.25 * sin(2 * CV_PI * 0.5 * imu_time) + 0.75);
       // F_x(6,6) = 0.25 * 2 * CV_PI * 0.5 * cos(2 * CV_PI * 0.5 * imu_time) * (-tau*tau); F_x(18,18) = 0.00001;
-      if (exposure_estimate_en) cov_w(6, 6) = cov_inv_expo * dt * dt;
-      cov_w.block<3, 3>(0, 0).diagonal() = cov_gyr * dt * dt;
-      cov_w.block<3, 3>(7, 7) = R_imu * cov_acc.asDiagonal() * R_imu.transpose() * dt * dt;
+      if (exposure_estimate_en) cov_w(6, 6) = cov_inv_expo * dt * dt; // 曝光时间噪声
+      cov_w.block<3, 3>(0, 0).diagonal() = cov_gyr * dt * dt; // 陀螺仪噪声导致的姿态误差
+      // 3-5 是全零
+      cov_w.block<3, 3>(7, 7) = R_imu * cov_acc.asDiagonal() * R_imu.transpose() * dt * dt; // 加计噪声
       cov_w.block<3, 3>(10, 10).diagonal() = cov_bias_gyr * dt * dt; // bias gyro covariance
       cov_w.block<3, 3>(13, 13).diagonal() = cov_bias_acc * dt * dt; // bias acc covariance
 
-      state_inout.cov = F_x * state_inout.cov * F_x.transpose() + cov_w;
+      // kalman filter 中更新系统协方差
+      state_inout.cov = F_x * state_inout.cov * F_x.transpose() + cov_w; // 
       // state_inout.cov.block<18,18>(0,0) = F_x.block<18,18>(0,0) *
       // state_inout.cov.block<18,18>(0,0) * F_x.block<18,18>(0,0).transpose() +
       // cov_w.block<18,18>(0,0);
@@ -533,11 +537,14 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
 
   /*** undistort each lidar point (backward propagation), ONLY working for LIO
    * update ***/
+  // 2. lidar 点云去畸变 （后相传比）
   if (lidar_meas.lio_vio_flg == LIO)
   {
     auto it_pcl = pcl_wait_proc.points.end() - 1;
     M3D extR_Ri(Lid_rot_to_IMU.transpose() * state_inout.rot_end.transpose());
     V3D exrR_extT(Lid_rot_to_IMU.transpose() * Lid_offset_to_IMU);
+
+    // 根据 IMU 提供的位姿对每个lidar点进行时间戳匹配并进行坐标变换
     for (auto it_kp = IMUpose.end() - 1; it_kp != IMUpose.begin(); it_kp--)
     {
       auto head = it_kp - 1;
@@ -574,6 +581,10 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
 
         if (it_pcl == pcl_wait_proc.points.begin()) break;
       }
+
+      // 这里使用的是基于 IMU 积分得到的旋转矩阵和线性加速度 进行积分与变换，而不是使用球面四元数插值（Spherical Linear Interpolation, SLERP）
+      // 前者有明确物理意义，适合快速运动、大角度旋转、高动态平台（如无人机），计算量相对较大，误差来源：imu噪声，积分漂移
+      // 后者平缓运动、低速平台（如机器人慢速移动），误差来源：无运动建模导致的插值误差
     }
     pcl_out = pcl_wait_proc;
     pcl_wait_proc.clear();

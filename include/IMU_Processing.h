@@ -109,15 +109,15 @@ private:
   PointCloudXYZI pcl_wait_proc; // 点云缓冲区
   sensor_msgs::ImuConstPtr last_imu; // 上一次的imu数据
   PointCloudXYZI::Ptr cur_pcl_un_;
-  vector<Pose6D> IMUpose;
+  vector<Pose6D> IMUpose; // 前向传播中保存的imu位姿
 
   M3D Lid_rot_to_IMU; // lidar to imu rotation
   V3D Lid_offset_to_IMU; // lidar to imu translation
 
   V3D mean_acc;
   V3D mean_gyr;
-  V3D angvel_last;
-  V3D acc_s_last;
+  V3D angvel_last; // imu 前向传播角速度
+  V3D acc_s_last; // imu 前向传播加速度
   double last_prop_end_time; // 上一帧传播的结束时间
   double time_last_scan; // 上一次scan扫描时间
   int init_iter_num = 1;
