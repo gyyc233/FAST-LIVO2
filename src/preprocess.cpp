@@ -89,6 +89,7 @@ void Preprocess::process(const sensor_msgs::PointCloud2::ConstPtr &msg, PointClo
 
 void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
 {
+  // initial
   pl_surf.clear();
   pl_corn.clear();
   pl_full.clear();
@@ -106,12 +107,14 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
     pl_buff[i].clear();
     pl_buff[i].reserve(plsize);
   }
+
   uint valid_num = 0;
 
   if (feature_enabled)
   {
     for (uint i = 1; i < plsize; i++)
     {
+      // 确定扫描线数量以及点是否有效
       if ((msg->points[i].line < N_SCANS) && ((msg->points[i].tag & 0x30) == 0x10))
       {
         pl_full[i].x = msg->points[i].x;
@@ -121,6 +124,7 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
         pl_full[i].curvature = msg->points[i].offset_time / float(1000000); // use curvature as time of each laser points
 
         bool is_new = false;
+        // 根据距离保留新点
         if ((abs(pl_full[i].x - pl_full[i - 1].x) > 1e-7) || (abs(pl_full[i].y - pl_full[i - 1].y) > 1e-7) ||
             (abs(pl_full[i].z - pl_full[i - 1].z) > 1e-7))
         {
@@ -128,14 +132,17 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
         }
       }
     }
+
     static int count = 0;
     static double time = 0.0;
     count++;
     double t0 = omp_get_wtime();
     for (int j = 0; j < N_SCANS; j++)
     {
+      // 跳过点数较少的扫描线
       if (pl_buff[j].size() <= 5) continue;
-      pcl::PointCloud<PointType> &pl = pl_buff[j];
+
+      pcl::PointCloud<PointType> &pl = pl_buff[j]; // 当前扫描线点云
       plsize = pl.size();
       vector<orgtype> &types = typess[j];
       types.clear();
@@ -143,11 +150,11 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
       plsize--;
       for (uint i = 0; i < plsize; i++)
       {
-        types[i].range = pl[i].x * pl[i].x + pl[i].y * pl[i].y;
+        types[i].range = pl[i].x * pl[i].x + pl[i].y * pl[i].y; // 点到原点距离平方
         vx = pl[i].x - pl[i + 1].x;
         vy = pl[i].y - pl[i + 1].y;
         vz = pl[i].z - pl[i + 1].z;
-        types[i].dista = vx * vx + vy * vy + vz * vz;
+        types[i].dista = vx * vx + vy * vy + vz * vz; // 当前点与下一个点之间距离
       }
       types[plsize].range = pl[plsize].x * pl[plsize].x + pl[plsize].y * pl[plsize].y;
       give_feature(pl, types);
@@ -175,13 +182,16 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
         else
         {
           // if(fabs(pl_full[i].curvature - pl_full[i - 1].curvature) > 1.0) ROS_ERROR("time jump: %f", fabs(pl_full[i].curvature - pl_full[i - 1].curvature));
+          // 后续点会检测与前一个点的时间差是否过大，如果超过阈值，则修正为平均值（避免突变）
           pl_full[i].curvature = fabs(pl_full[i].curvature - pl_full[i - 1].curvature) < 1.0
                                      ? pl_full[i].curvature
                                      : pl_full[i - 1].curvature + 0.004166667f; // float(100/24000)
         }
 
+        // 只保留每 point_filter_num 个点中的一个（下采样）
         if (valid_num % point_filter_num == 0)
         {
+          // blind_sqr 是盲区半径平方，跳过离传感器太近的无效点
           if (pl_full[i].x * pl_full[i].x + pl_full[i].y * pl_full[i].y + pl_full[i].z * pl_full[i].z >= blind_sqr)
           {
             pl_surf.push_back(pl_full[i]);
