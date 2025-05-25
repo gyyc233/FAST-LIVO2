@@ -598,6 +598,8 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
   double t1, t2, t3;
   t1 = omp_get_wtime();
   ROS_ASSERT(lidar_meas.lidar != nullptr);
+
+  // 如果没有imu数据则只对位姿与速度进行更新
   if (!imu_en)
   {
     Forward_without_imu(lidar_meas, stat, *cur_pcl_un_);
@@ -615,6 +617,7 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
     /// The very first lidar frame
     IMU_init(meas, stat, init_iter_num);
 
+    // imu初始化
     imu_need_init = true;
 
     last_imu = meas.imu.back();
@@ -630,12 +633,14 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
       ROS_INFO("IMU Initials: ba covarience: %.8f %.8f %.8f; bg covarience: "
                "%.8f %.8f %.8f",
                cov_bias_acc[0], cov_bias_acc[1], cov_bias_acc[2], cov_bias_gyr[0], cov_bias_gyr[1], cov_bias_gyr[2]);
+      // 保存imu初始化结果
       fout_imu.open(DEBUG_FILE_DIR("imu.txt"), ios::out);
     }
 
     return;
   }
 
+  // 状态估计与运动畸变矫正
   UndistortPcl(lidar_meas, stat, *cur_pcl_un_);
   // cout << "[ IMU ] undistorted point num: " << cur_pcl_un_->size() << endl;
 }
