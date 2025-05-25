@@ -713,7 +713,7 @@ void Preprocess::xt32_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
 
 void Preprocess::give_feature(pcl::PointCloud<PointType> &pl, vector<orgtype> &types)
 {
-  int plsize = pl.size();
+  int plsize = pl.size(); // 当前扫描线上的点数量
   int plsize2;
   if (plsize == 0)
   {
@@ -722,6 +722,7 @@ void Preprocess::give_feature(pcl::PointCloud<PointType> &pl, vector<orgtype> &t
   }
   uint head = 0;
 
+  // 跳过小于盲区的点
   while (types[head].range < blind_sqr)
   {
     head++;
@@ -730,8 +731,8 @@ void Preprocess::give_feature(pcl::PointCloud<PointType> &pl, vector<orgtype> &t
   // Surf
   plsize2 = (plsize > group_size) ? (plsize - group_size) : 0;
 
-  Eigen::Vector3d curr_direct(Eigen::Vector3d::Zero());
-  Eigen::Vector3d last_direct(Eigen::Vector3d::Zero());
+  Eigen::Vector3d curr_direct(Eigen::Vector3d::Zero()); // 当前组点的方向向量
+  Eigen::Vector3d last_direct(Eigen::Vector3d::Zero()); // 上一组点的方向向量
 
   uint i_nex = 0, i2;
   uint last_i = 0;
@@ -745,12 +746,15 @@ void Preprocess::give_feature(pcl::PointCloud<PointType> &pl, vector<orgtype> &t
 
     i2 = i;
 
+    // 判断从点 i 开始的一组点是否构成平面，计算该组点的方向向量
     plane_type = plane_judge(pl, types, i, i_nex, curr_direct);
 
+    // 构成平面
     if (plane_type == 1)
     {
       for (uint j = i; j <= i_nex; j++)
       {
+        // 中间点记为真平面，两端点记为可能平面
         if (j != i && j != i_nex) { types[j].ftype = Real_Plane; }
         else { types[j].ftype = Poss_Plane; }
       }
@@ -758,6 +762,7 @@ void Preprocess::give_feature(pcl::PointCloud<PointType> &pl, vector<orgtype> &t
       // if(last_state==1 && fabs(last_direct.sum())>0.5)
       if (last_state == 1 && last_direct.norm() > 0.1)
       {
+        // 若前后两组点方向夹角在 [45°, 135°] 之间，则当前点视为边缘点，否则继续作为平面点
         double mod = last_direct.transpose() * curr_direct;
         if (mod > -0.707 && mod < 0.707) { types[i].ftype = Edge_Plane; }
         else { types[i].ftype = Real_Plane; }

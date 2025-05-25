@@ -192,7 +192,7 @@ private:
   void Pandar128_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void l515_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
 
-  // 为点云中的每个点分配几何特征
+  // 为点云中的每个点分配几何特征，打标签
   void give_feature(PointCloudXYZI &pl, vector<orgtype> &types);
 
   void pub_func(PointCloudXYZI &pl, const ros::Time &ct);
