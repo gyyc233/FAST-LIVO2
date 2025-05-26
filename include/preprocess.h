@@ -197,13 +197,25 @@ private:
 
   void pub_func(PointCloudXYZI &pl, const ros::Time &ct);
 
-  // 判断点是否为平面点
+  /// @brief 判断从当前点开始的一组点是否构成一个平面特征
+  /// @param pl 当前线扫描点云数据
+  /// @param types 每个点的特征信息结构数组
+  /// @param i 当前起始点索引
+  /// @param i_nex 用于记录下一组点的结束索引（out 参数）
+  /// @param curr_direct 输出方向向量（out 参数）
+  /// @return 0: no_plane; 1:plane; 2: blind or invalid
   int plane_judge(const PointCloudXYZI &pl, vector<orgtype> &types, uint i, uint &i_nex, Eigen::Vector3d &curr_direct);
 
-  // 检测小平面
+  // 检测小平面（未实现）
   bool small_plane(const PointCloudXYZI &pl, vector<orgtype> &types, uint i_cur, uint &i_nex, Eigen::Vector3d &curr_direct);
 
-  // 判断点是否在边缘跳跃
+  /// @brief 判断当前点是否属于边缘跳跃（Edge Jump）特征
+  /// @note 该函数通过比较当前点 i 及其前后两个邻近点之间的距离变化，判断是否存在显著的“边缘跳跃”现象 (墙角，地面与障碍物交界，物体边界附近)
+  /// @param pl 当前扫描线的点云数据
+  /// @param types 每个点的特征信息数组
+  /// @param i 当前点索引
+  /// @param nor_dir 判断方向（Prev 或 Next)
+  /// @return 
   bool edge_jump_judge(const PointCloudXYZI &pl, vector<orgtype> &types, uint i, Surround nor_dir);
 
   int group_size;
