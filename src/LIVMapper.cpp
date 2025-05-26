@@ -125,20 +125,24 @@ void LIVMapper::initializeComponents()
   vio_manager->grid_size = grid_size;
   vio_manager->patch_size = patch_size;
   vio_manager->outlier_threshold = outlier_threshold;
-  vio_manager->setImuToLidarExtrinsic(extT, extR);
-  vio_manager->setLidarToCameraExtrinsic(cameraextrinR, cameraextrinT);
+
+  vio_manager->setImuToLidarExtrinsic(extT, extR); // imu to lidar
+  vio_manager->setLidarToCameraExtrinsic(cameraextrinR, cameraextrinT); // lidar to camera
+
   vio_manager->state = &_state;
   vio_manager->state_propagat = &state_propagat;
   vio_manager->max_iterations = max_iterations;
   vio_manager->img_point_cov = IMG_POINT_COV;
+
   vio_manager->normal_en = normal_en;
   vio_manager->inverse_composition_en = inverse_composition_en;
-  vio_manager->raycast_en = raycast_en;
+  vio_manager->raycast_en = raycast_en; // 
+
   vio_manager->grid_n_width = grid_n_width;
   vio_manager->grid_n_height = grid_n_height;
   vio_manager->patch_pyrimid_level = patch_pyrimid_level;
   vio_manager->exposure_estimate_en = exposure_estimate_en;
-  vio_manager->colmap_output_en = colmap_output_en;
+  vio_manager->colmap_output_en = colmap_output_en; // 按需光线投射
   vio_manager->initializeVIO();
 
   p_imu->set_extrinsic(extT, extR);
@@ -226,10 +230,14 @@ void LIVMapper::gravityAlignment()
   if (!p_imu->imu_need_init && !gravity_align_finished) 
   {
     std::cout << "Gravity Alignment Starts" << std::endl;
-    V3D ez(0, 0, -1), gz(_state.gravity);
+    V3D ez(0, 0, -1); // 理想世界坐标系下重力方向 
+    V3D gz(_state.gravity);
+    // Quaterniond::FromTwoVectors 根据两个向量，得到旋转
+    // 将 IMU 估计的重力方向 gz 转换为世界坐标系方向 ez，得到一个旋转向量 G_q_I0
     Quaterniond G_q_I0 = Quaterniond::FromTwoVectors(gz, ez);
     M3D G_R_I0 = G_q_I0.toRotationMatrix();
 
+    // 将imu初始坐标系与世界坐标系对齐
     _state.pos_end = G_R_I0 * _state.pos_end;
     _state.rot_end = G_R_I0 * _state.rot_end;
     _state.vel_end = G_R_I0 * _state.vel_end;
@@ -243,11 +251,14 @@ void LIVMapper::processImu()
 {
   // double t0 = omp_get_wtime();
 
+  // 计算imu误差状态系数矩阵更新 _state，并进行lidar点云去畸变
   p_imu->Process2(LidarMeasures, _state, feats_undistort);
 
   if (gravity_align_en) gravityAlignment();
 
+  // 为后续地图构建和匹配提供最新位姿与点云信息
   state_propagat = _state;
+  // 状态传播到 VoxelMapManager
   voxelmap_manager->state_ = _state;
   voxelmap_manager->feats_undistort_ = feats_undistort;
 
@@ -275,6 +286,7 @@ void LIVMapper::stateEstimationAndMapping()
 void LIVMapper::handleVIO() 
 {
   euler_cur = RotMtoEuler(_state.rot_end);
+  // 记录预积分之前的状态信息，*57.3 是将弧度转为角度
   fout_pre << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
             << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose() << " "
             << _state.bias_a.transpose() << " " << V3D(_state.inv_expo_time, 0, 0).transpose() << std::endl;
@@ -285,8 +297,10 @@ void LIVMapper::handleVIO()
     return;
   }
     
+  // 当前帧提取的特征点数量
   std::cout << "[ VIO ] Raw feature num: " << pcl_w_wait_pub->points.size() << std::endl;
 
+  // 是否到达指定的绘制时间
   if (fabs((LidarMeasures.last_lio_update_time - _first_lidar_time) - plot_time) < (frame_cnt / 2 * 0.1)) 
   {
     vio_manager->plot_flag = true;
@@ -298,6 +312,7 @@ void LIVMapper::handleVIO()
 
   vio_manager->processFrame(LidarMeasures.measures.back().img, _pv_list, voxelmap_manager->voxel_map_, LidarMeasures.last_lio_update_time - _first_lidar_time);
 
+  // 若启用了imu预积分传播，则更新 EKF 相关状态
   if (imu_prop_enable) 
   {
     ekf_finish_once = true;
@@ -318,9 +333,11 @@ void LIVMapper::handleVIO()
   //   visual_sub_map->push_back(temp_map);
   // }
 
+  // 发布当前帧世界坐标系点云与图像
   publish_frame_world(pubLaserCloudFullRes, vio_manager);
   publish_img_rgb(pubImage, vio_manager);
 
+  // 记录后处理的信息状态
   euler_cur = RotMtoEuler(_state.rot_end);
   fout_out << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
             << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose() << " "
@@ -328,7 +345,8 @@ void LIVMapper::handleVIO()
 }
 
 void LIVMapper::handleLIO() 
-{    
+{
+  // 输出预积分前姿态
   euler_cur = RotMtoEuler(_state.rot_end);
   fout_pre << setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
            << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose() << " "
@@ -349,6 +367,7 @@ void LIVMapper::handleLIO()
 
   feats_down_size = feats_down_body->points.size();
   voxelmap_manager->feats_down_body_ = feats_down_body;
+  // 将点云变换到世界坐标系
   transformLidar(_state.rot_end, _state.pos_end, feats_down_body, feats_down_world);
   voxelmap_manager->feats_down_world_ = feats_down_world;
   voxelmap_manager->feats_down_size_ = feats_down_size;
@@ -356,17 +375,20 @@ void LIVMapper::handleLIO()
   if (!lidar_map_inited) 
   {
     lidar_map_inited = true;
+    // 创建初始体素地图
     voxelmap_manager->BuildVoxelMap();
   }
 
   double t1 = omp_get_wtime();
 
+  // 使用地图数据优化当前状态
   voxelmap_manager->StateEstimation(state_propagat);
   _state = voxelmap_manager->state_;
   _pv_list = voxelmap_manager->pv_list_;
 
   double t2 = omp_get_wtime();
 
+  // 若启用imu预积分，更新EKF状态
   if (imu_prop_enable) 
   {
     ekf_finish_once = true;
@@ -375,6 +397,7 @@ void LIVMapper::handleLIO()
     state_update_flg = true;
   }
 
+  // 启用位姿输出
   if (pose_output_en) 
   {
     static bool pos_opend = false;
@@ -405,27 +428,34 @@ void LIVMapper::handleLIO()
   double t3 = omp_get_wtime();
 
   PointCloudXYZI::Ptr world_lidar(new PointCloudXYZI());
+  // feats_down_body 经过 _state.rot_end 变换到 world_lidar
+  // 将点云从 body 坐标系变换到 world 坐标系
   transformLidar(_state.rot_end, _state.pos_end, feats_down_body, world_lidar);
   for (size_t i = 0; i < world_lidar->points.size(); i++) 
   {
     voxelmap_manager->pv_list_[i].point_w << world_lidar->points[i].x, world_lidar->points[i].y, world_lidar->points[i].z;
     M3D point_crossmat = voxelmap_manager->cross_mat_list_[i];
     M3D var = voxelmap_manager->body_cov_list_[i];
+
+    // 协方差包含旋转+交叉项+状态协方差
     var = (_state.rot_end * extR) * var * (_state.rot_end * extR).transpose() +
           (-point_crossmat) * _state.cov.block<3, 3>(0, 0) * (-point_crossmat).transpose() + _state.cov.block<3, 3>(3, 3);
     voxelmap_manager->pv_list_[i].var = var;
   }
+  // 使用更新后的点云和协方差更新体素地图
   voxelmap_manager->UpdateVoxelMap(voxelmap_manager->pv_list_);
   std::cout << "[ LIO ] Update Voxel Map" << std::endl;
   _pv_list = voxelmap_manager->pv_list_;
   
   double t4 = omp_get_wtime();
 
+  // 启用滑窗机制
   if(voxelmap_manager->config_setting_.map_sliding_en)
   {
     voxelmap_manager->mapSliding();
   }
   
+  // 完整点云转到world
   PointCloudXYZI::Ptr laserCloudFullRes(dense_map_en ? feats_undistort : feats_down_body);
   int size = laserCloudFullRes->points.size();
   PointCloudXYZI::Ptr laserCloudWorld(new PointCloudXYZI(size, 1));
@@ -443,6 +473,7 @@ void LIVMapper::handleLIO()
   publish_mavros(mavros_pose_publisher);
 
   frame_num++;
+  // 实时统计平均耗时，用于性能分析
   aver_time_consu = aver_time_consu * (frame_num - 1) / frame_num + (t4 - t0) / frame_num;
 
   // aver_time_icp = aver_time_icp * (frame_num - 1) / frame_num + (t2 - t1) / frame_num;
@@ -549,27 +580,33 @@ void LIVMapper::run()
 
 void LIVMapper::prop_imu_once(StatesGroup &imu_prop_state, const double dt, V3D acc_avr, V3D angvel_avr)
 {
+  // 加计归一化并减去bias_a;
   double mean_acc_norm = p_imu->IMU_mean_acc_norm;
   acc_avr = acc_avr * G_m_s2 / mean_acc_norm - imu_prop_state.bias_a;
+  
+  // 去除陀螺仪bias
   angvel_avr -= imu_prop_state.bias_g;
 
+  // 更新旋转
   M3D Exp_f = Exp(angvel_avr, dt);
   /* propogation of IMU attitude */
   imu_prop_state.rot_end = imu_prop_state.rot_end * Exp_f;
 
-  /* Specific acceleration (global frame) of IMU */
+  /* Specific acceleration (global frame) of IMU J加速度转到世界坐标系再加上重力*/
   V3D acc_imu = imu_prop_state.rot_end * acc_avr + V3D(imu_prop_state.gravity[0], imu_prop_state.gravity[1], imu_prop_state.gravity[2]);
 
-  /* propogation of IMU */
+  /* propogation of IMU 更新imu位置 */
   imu_prop_state.pos_end = imu_prop_state.pos_end + imu_prop_state.vel_end * dt + 0.5 * acc_imu * dt * dt;
 
-  /* velocity of IMU */
+  /* velocity of IMU 更新imu速度*/
   imu_prop_state.vel_end = imu_prop_state.vel_end + acc_imu * dt;
 }
 
 void LIVMapper::imu_prop_callback(const ros::TimerEvent &e)
 {
+  // 等待imu初始化完成
   if (p_imu->imu_need_init || !new_imu || !ekf_finish_once) { return; }
+
   mtx_buffer_imu_prop.lock();
   new_imu = false; // 控制propagate频率和IMU频率一致
   if (imu_prop_enable && !prop_imu_buffer.empty())
@@ -578,19 +615,25 @@ void LIVMapper::imu_prop_callback(const ros::TimerEvent &e)
     if (state_update_flg)
     {
       imu_propagate = latest_ekf_state;
-      // drop all useless imu pkg
+      // drop all useless imu pkg 删除所有早于 latest_ekf_time 的 IMU 数据包
       while ((!prop_imu_buffer.empty() && prop_imu_buffer.front().header.stamp.toSec() < latest_ekf_time))
       {
         prop_imu_buffer.pop_front();
       }
       last_t_from_lidar_end_time = 0;
+
       for (int i = 0; i < prop_imu_buffer.size(); i++)
       {
         double t_from_lidar_end_time = prop_imu_buffer[i].header.stamp.toSec() - latest_ekf_time;
         double dt = t_from_lidar_end_time - last_t_from_lidar_end_time;
         // cout << "prop dt" << dt << ", " << t_from_lidar_end_time << ", " << last_t_from_lidar_end_time << endl;
+
+        // 提取加速度与角速度
         V3D acc_imu(prop_imu_buffer[i].linear_acceleration.x, prop_imu_buffer[i].linear_acceleration.y, prop_imu_buffer[i].linear_acceleration.z);
+
         V3D omg_imu(prop_imu_buffer[i].angular_velocity.x, prop_imu_buffer[i].angular_velocity.y, prop_imu_buffer[i].angular_velocity.z);
+
+        // imu 状态更新
         prop_imu_once(imu_propagate, dt, acc_imu, omg_imu);
         last_t_from_lidar_end_time = t_from_lidar_end_time;
       }
@@ -598,6 +641,7 @@ void LIVMapper::imu_prop_callback(const ros::TimerEvent &e)
     }
     else
     {
+      // 没有触发状态更新，则直接使用最新的 IMU 数据进行传播
       V3D acc_imu(newest_imu.linear_acceleration.x, newest_imu.linear_acceleration.y, newest_imu.linear_acceleration.z);
       V3D omg_imu(newest_imu.angular_velocity.x, newest_imu.angular_velocity.y, newest_imu.angular_velocity.z);
       double t_from_lidar_end_time = newest_imu.header.stamp.toSec() - latest_ekf_time;
@@ -606,6 +650,7 @@ void LIVMapper::imu_prop_callback(const ros::TimerEvent &e)
       last_t_from_lidar_end_time = t_from_lidar_end_time;
     }
 
+    // 提取更新后的 IMU 状态（位置、速度、姿态）并发布
     V3D posi, vel_i;
     Eigen::Quaterniond q;
     posi = imu_propagate.pos_end;
@@ -676,6 +721,7 @@ template <typename T> Matrix<T, 3, 1> LIVMapper::pointBodyToWorld(const Matrix<T
 void LIVMapper::RGBpointBodyToWorld(PointType const *const pi, PointType *const po)
 {
   V3D p_body(pi->x, pi->y, pi->z);
+  // body 坐标从imu坐标系转到lidar，再转到world
   V3D p_global(_state.rot_end * (extR * p_body + extT) + _state.pos_end);
   po->x = p_global(0);
   po->y = p_global(1);

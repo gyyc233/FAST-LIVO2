@@ -26,29 +26,58 @@ class LIVMapper
 public:
   LIVMapper(ros::NodeHandle &nh);
   ~LIVMapper();
+
+  // 初始化发布订阅
   void initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_transport::ImageTransport &it);
+  // 初始化组件
   void initializeComponents();
+  // 初始化文件
   void initializeFiles();
+
   void run();
+
+  // 重力对齐
   void gravityAlignment();
+  // 首帧处理
   void handleFirstFrame();
+  // 状态估计与地图匹配
   void stateEstimationAndMapping();
   void handleVIO();
   void handleLIO();
+
+  /// @brief 保存pcl点云与(optional)colmap点云
   void savePCD();
   void processImu();
   
+  // 同步 LiDAR 和 IMU 数据包
   bool sync_packages(LidarMeasureGroup &meas);
+  
+  // 单次imu状态传播
   void prop_imu_once(StatesGroup &imu_prop_state, const double dt, V3D acc_avr, V3D angvel_avr);
+
+  // 定时触发 IMU 状态传播，在系统状态更新后，IMU 数据对当前状态进行连续预测，为后续 LiDAR 处理提供先验位姿估计
   void imu_prop_callback(const ros::TimerEvent &e);
+
+
+  // 坐标变换
   void transformLidar(const Eigen::Matrix3d rot, const Eigen::Vector3d t, const PointCloudXYZI::Ptr &input_cloud, PointCloudXYZI::Ptr &trans_cloud);
   void pointBodyToWorld(const PointType &pi, PointType &po);
- 
   void RGBpointBodyToWorld(PointType const *const pi, PointType *const po);
+
+  // 标准点云回调（如 Ouster）
   void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg);
+
+  // Livox LiDAR 数据回调
   void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg_in);
+
+  // IMU 数据回调
   void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in);
+
+  // 图像数据回调
   void img_cbk(const sensor_msgs::ImageConstPtr &msg_in);
+  // callback
+
+  // 可视化发布
   void publish_img_rgb(const image_transport::Publisher &pubImage, VIOManagerPtr vio_manager);
   void publish_frame_world(const ros::Publisher &pubLaserCloudFullRes, VIOManagerPtr vio_manager);
   void publish_visual_sub_map(const ros::Publisher &pubSubVisualMap);
@@ -56,39 +85,46 @@ public:
   void publish_odometry(const ros::Publisher &pubOdomAftMapped);
   void publish_mavros(const ros::Publisher &mavros_pose_publisher);
   void publish_path(const ros::Publisher pubPath);
+  // 可视化发布
+
   void readParameters(ros::NodeHandle &nh);
   template <typename T> void set_posestamp(T &out);
   template <typename T> void pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi, Eigen::Matrix<T, 3, 1> &po);
   template <typename T> Eigen::Matrix<T, 3, 1> pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi);
+
+  // 图像帧处理
   cv::Mat getImageFromMsg(const sensor_msgs::ImageConstPtr &img_msg);
 
   std::mutex mtx_buffer, mtx_buffer_imu_prop;
   std::condition_variable sig_buffer;
 
-  SLAM_MODE slam_mode_;
-  std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map;
+  SLAM_MODE slam_mode_; // 运行模式
+  std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map; // 存储地图的体素树结构
   
-  string root_dir;
+  string root_dir; // 系统根目录
   string lid_topic, imu_topic, seq_name, img_topic;
-  V3D extT;
-  M3D extR;
+  V3D extT; // lidar-imu 外参
+  M3D extR; // lidar-imu 旋转
 
   int feats_down_size = 0, max_iterations = 0;
 
-  double res_mean_last = 0.05;
-  double gyr_cov = 0, acc_cov = 0, inv_expo_cov = 0;
+  double res_mean_last = 0.05; // 地图分辨率
+  double gyr_cov = 0, acc_cov = 0, inv_expo_cov = 0; // 陀螺仪，加计，曝光时间倒数协方差
   double blind_rgb_points = 0.0;
   double last_timestamp_lidar = -1.0, last_timestamp_imu = -1.0, last_timestamp_img = -1.0;
-  double filter_size_surf_min = 0;
+  double filter_size_surf_min = 0; // 点云降采样 leaf size
   double filter_size_pcd = 0;
   double _first_lidar_time = 0.0;
+
+  // 时间统计
   double match_time = 0, solve_time = 0, solve_const_H_time = 0;
 
   bool lidar_map_inited = false, pcd_save_en = false, pub_effect_point_en = false, pose_output_en = false, ros_driver_fix_en = false;
   int pcd_save_interval = -1, pcd_index = 0;
   int pub_scan_num = 1;
 
-  StatesGroup imu_propagate, latest_ekf_state;
+  StatesGroup imu_propagate;
+  StatesGroup latest_ekf_state; // 最近一次EKF更新状态
 
   bool new_imu = false, state_update_flg = false, imu_prop_enable = true, ekf_finish_once = false;
   deque<sensor_msgs::Imu> prop_imu_buffer;
@@ -99,7 +135,8 @@ public:
   double imu_time_offset = 0.0;
   double lidar_time_offset = 0.0;
 
-  bool gravity_align_en = false, gravity_align_finished = false;
+  bool gravity_align_en = false; // 是否启用重力对齐
+  bool gravity_align_finished = false;
 
   bool sync_jump_flag = false;
 
@@ -118,19 +155,21 @@ public:
   double plot_time;
   int frame_cnt;
   double img_time_offset = 0.0;
-  deque<PointCloudXYZI::Ptr> lid_raw_data_buffer;
+  deque<PointCloudXYZI::Ptr> lid_raw_data_buffer; // 原始LiDAR数据
   deque<double> lid_header_time_buffer;
-  deque<sensor_msgs::Imu::ConstPtr> imu_buffer;
-  deque<cv::Mat> img_buffer;
+  deque<sensor_msgs::Imu::ConstPtr> imu_buffer; // imu 缓存
+  deque<cv::Mat> img_buffer; // 图像帧缓冲
   deque<double> img_time_buffer;
   vector<pointWithVar> _pv_list;
+
   vector<double> extrinT;
   vector<double> extrinR;
-  vector<double> cameraextrinT;
-  vector<double> cameraextrinR;
+
+  vector<double> cameraextrinT; // lidar-camera extrin translation
+  vector<double> cameraextrinR; // lidar-camera extrin rotation
   double IMG_POINT_COV;
 
-  PointCloudXYZI::Ptr visual_sub_map;
+  PointCloudXYZI::Ptr visual_sub_map; // 当前可视化的子地图
   PointCloudXYZI::Ptr feats_undistort;
   PointCloudXYZI::Ptr feats_down_body;
   PointCloudXYZI::Ptr feats_down_world;
@@ -146,7 +185,7 @@ public:
   V3D euler_cur;
 
   LidarMeasureGroup LidarMeasures;
-  StatesGroup _state;
+  StatesGroup _state; // 当前状态
   StatesGroup  state_propagat;
 
   nav_msgs::Path path;
@@ -154,10 +193,10 @@ public:
   geometry_msgs::Quaternion geoQuat;
   geometry_msgs::PoseStamped msg_body_pose;
 
-  PreprocessPtr p_pre;
-  ImuProcessPtr p_imu;
-  VoxelMapManagerPtr voxelmap_manager;
-  VIOManagerPtr vio_manager;
+  PreprocessPtr p_pre; // lidar 点云预处理
+  ImuProcessPtr p_imu; // imu处理
+  VoxelMapManagerPtr voxelmap_manager; // 体素地图管理器
+  VIOManagerPtr vio_manager;  // 视觉-惯性融合模块
 
   ros::Publisher plane_pub;
   ros::Publisher voxel_pub;
