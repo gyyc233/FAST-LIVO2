@@ -682,7 +682,7 @@ void LIVMapper::transformLidar(const Eigen::Matrix3d rot, const Eigen::Vector3d 
   {
     pcl::PointXYZINormal p_c = input_cloud->points[i];
     Eigen::Vector3d p(p_c.x, p_c.y, p_c.z);
-    p = (rot * (extR * p + extT) + t);
+    p = (rot * (extR * p + extT) + t); // 将点从lidar坐标系转换到imu坐标系，再转到世界坐标系
     PointType pi;
     pi.x = p(0);
     pi.y = p(1);
@@ -744,7 +744,7 @@ void LIVMapper::standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
   }
   // ROS_INFO("get point cloud at time: %.6f", msg->header.stamp.toSec());
   PointCloudXYZI::Ptr ptr(new PointCloudXYZI());
-  p_pre->process(msg, ptr);
+  p_pre->process(msg, ptr); // lidar点云预处理识别平面点，边缘点
   lid_raw_data_buffer.push_back(ptr);
   lid_header_time_buffer.push_back(cur_head_time);
   last_timestamp_lidar = cur_head_time;
@@ -811,6 +811,7 @@ void LIVMapper::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
     ROS_WARN("IMU and LiDAR not synced! delta time: %lf .\n", last_timestamp_lidar - timestamp);
   }
 
+  // 启用强制时间同步,将 IMU 时间戳对齐到 LiDAR 时间戳
   if (ros_driver_fix_en) timestamp += std::round(last_timestamp_lidar - timestamp);
   msg->header.stamp = ros::Time().fromSec(timestamp);
 
@@ -919,7 +920,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
 
   switch (slam_mode_)
   {
-  case ONLY_LIO:
+  case ONLY_LIO: // lidar+imu
   {
     if (meas.last_lio_update_time < 0.0) meas.last_lio_update_time = lid_header_time_buffer.front();
     if (!lidar_pushed)
@@ -934,14 +935,18 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       lidar_pushed = true;                                                                                       // flag
     }
 
+    // 检查 IMU 是否覆盖整个 LiDAR 扫描周期
     if (imu_en && last_timestamp_imu < meas.lidar_frame_end_time)
     { // waiting imu message needs to be
       // larger than _lidar_frame_end_time,
       // make sure complete propagate.
       // ROS_ERROR("out sync");
+
+      // 说明 IMU 数据不足，无法完成前向传播
       return false;
     }
 
+    // 从imu缓冲区中提取所有时间早于 lidar_frame_end_time 的 IMU 数据包到m.imu
     struct MeasureGroup m; // standard method to keep imu message.
 
     m.imu.clear();
@@ -953,11 +958,13 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       m.imu.push_back(imu_buffer.front());
       imu_buffer.pop_front();
     }
+
     lid_raw_data_buffer.pop_front();
     lid_header_time_buffer.pop_front();
     mtx_buffer.unlock();
     sig_buffer.notify_all();
 
+   // 组装LI数据
     meas.lio_vio_flg = LIO; // process lidar topic, so timestamp should be lidar scan end.
     meas.measures.push_back(m);
     // ROS_INFO("ONlY HAS LiDAR and IMU, NO IMAGE!");
@@ -970,7 +977,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
   case LIVO:
   {
     /*** For LIVO mode, the time of LIO update is set to be the same as VIO, LIO
-     * first than VIO imediatly ***/
+     * first than VIO imediatly LIO比VIO优先 ***/
     EKF_STATE last_lio_vio_flg = meas.lio_vio_flg;
     // double t0 = omp_get_wtime();
     switch (last_lio_vio_flg)
@@ -980,10 +987,12 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
     case VIO:
     {
       // printf("!!! meas.lio_vio_flg: %d \n", meas.lio_vio_flg);
-      double img_capture_time = img_time_buffer.front() + exposure_time_init;
+      double img_capture_time = img_time_buffer.front() + exposure_time_init; // 第一个图像帧的时间戳
       /*** has img topic, but img topic timestamp larger than lidar end time,
        * process lidar topic. After LIO update, the meas.lidar_frame_end_time
        * will be refresh. ***/
+
+      // 如果这是第一次运行，将 _last_lio_update_time 设置为第一个 LiDAR 帧的时间戳
       if (meas.last_lio_update_time < 0.0) meas.last_lio_update_time = lid_header_time_buffer.front();
       // printf("[ Data Cut ] wait \n");
       // printf("[ Data Cut ] last_lio_update_time: %lf \n",
@@ -992,6 +1001,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       double lid_newest_time = lid_header_time_buffer.back() + lid_raw_data_buffer.back()->points.back().curvature / double(1000);
       double imu_newest_time = imu_buffer.back()->header.stamp.toSec();
 
+      // 如果图像帧过时
       if (img_capture_time < meas.last_lio_update_time + 0.00001)
       {
         img_buffer.pop_front();
@@ -1000,6 +1010,8 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
         return false;
       }
 
+
+      // 若图像帧晚于最新lidar扫描时间或者晚于imu时间则无效
       if (img_capture_time > lid_newest_time || img_capture_time > imu_newest_time)
       {
         // ROS_ERROR("lost first camera frame");
@@ -1012,6 +1024,8 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
 
       // printf("[ Data Cut ] LIO \n");
       // printf("[ Data Cut ] img_capture_time: %lf \n", img_capture_time);
+
+      // 从 IMU 缓冲区中提取所有在 [last_lio_update_time, img_capture_time] 区间内的 IMU 数据包
       m.imu.clear();
       m.lio_time = img_capture_time;
       mtx_buffer.lock();
@@ -1037,6 +1051,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       meas.pcl_proc_next->reserve(max_size);
       // deque<PointCloudXYZI::Ptr> lidar_buffer_tmp;
 
+      // 根据每个lidar点的 curvature（即 LiDAR 内部时间偏移）判断其属于当前帧还是下一帧：
       while (!lid_raw_data_buffer.empty())
       {
         if (lid_header_time_buffer.front() > img_capture_time) break;
@@ -1050,18 +1065,19 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
           if (pcl[i].curvature < max_offs_time_ms)
           {
             pt.curvature += (frame_header_time - meas.last_lio_update_time) * 1000.0f;
-            meas.pcl_proc_cur->points.push_back(pt);
+            meas.pcl_proc_cur->points.push_back(pt); // 加入当前帧
           }
           else
           {
             pt.curvature += (frame_header_time - m.lio_time) * 1000.0f;
-            meas.pcl_proc_next->points.push_back(pt);
+            meas.pcl_proc_next->points.push_back(pt); // 加入下一帧
           }
         }
         lid_raw_data_buffer.pop_front();
         lid_header_time_buffer.pop_front();
       }
 
+      // 组装 MeasureGroup 并返回 true，供主线程进行 LIO 更新
       meas.measures.push_back(m);
       meas.lio_vio_flg = LIO;
       // meas.last_lio_update_time = m.lio_time;
@@ -1072,6 +1088,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       return true;
     }
 
+    // 注意：这里的LIO是位于LIVO分支下，是VIO模式结束后切换到LIO的情况
     case LIO:
     {
       double img_capture_time = img_time_buffer.front() + exposure_time_init;
@@ -1081,9 +1098,9 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       double imu_time = imu_buffer.front()->header.stamp.toSec();
 
       struct MeasureGroup m;
-      m.vio_time = img_capture_time;
-      m.lio_time = meas.last_lio_update_time;
-      m.img = img_buffer.front();
+      m.vio_time = img_capture_time; // 图像采集时间
+      m.lio_time = meas.last_lio_update_time; // 上一次 LIO 更新时间，作为参考时间戳
+      m.img = img_buffer.front(); // 第一帧图像
       mtx_buffer.lock();
       // while ((!imu_buffer.empty() && (imu_time < img_capture_time)))
       // {
@@ -1094,10 +1111,15 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       //   printf("[ Data Cut ] imu time: %lf \n",
       //   imu_buffer.front()->header.stamp.toSec());
       // }
+
+      // 删除已使用图像
       img_buffer.pop_front();
       img_time_buffer.pop_front();
+
       mtx_buffer.unlock();
       sig_buffer.notify_all();
+
+      // 将包含图像和 IMU 时间范围的 MeasureGroup 添加进 meas.measures
       meas.measures.push_back(m);
       lidar_pushed = false; // after VIO update, the _lidar_frame_end_time will be refresh.
       // printf("[ Data Cut ] VIO process time: %lf \n", omp_get_wtime() - t0);
@@ -1114,12 +1136,13 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
     break;
   }
 
-  case ONLY_LO:
+  case ONLY_LO: // 仅使用lidar数据
   {
     if (!lidar_pushed) 
     { 
       // If not in lidar scan, need to generate new meas
       if (lid_raw_data_buffer.empty())  return false;
+      // 从 LiDAR 缓冲区取出一帧点云
       meas.lidar = lid_raw_data_buffer.front(); // push the first lidar topic
       meas.lidar_frame_beg_time = lid_header_time_buffer.front(); // generate lidar_beg_time
       meas.lidar_frame_end_time  = meas.lidar_frame_beg_time + meas.lidar->points.back().curvature / double(1000); // calc lidar scan end time

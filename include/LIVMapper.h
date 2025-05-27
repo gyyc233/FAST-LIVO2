@@ -58,8 +58,11 @@ public:
   // 定时触发 IMU 状态传播，在系统状态更新后，IMU 数据对当前状态进行连续预测，为后续 LiDAR 处理提供先验位姿估计
   void imu_prop_callback(const ros::TimerEvent &e);
 
-
-  // 坐标变换
+  /// @brief 将点坐标从lidar通过extR extT转到imu，再通过 rot, t 转到世界坐标系下
+  /// @param rot imu基于世界坐标系旋转矩阵的状态估计
+  /// @param t imu基于世界坐标系位移的状态估计
+  /// @param input_cloud 
+  /// @param trans_cloud 
   void transformLidar(const Eigen::Matrix3d rot, const Eigen::Vector3d t, const PointCloudXYZI::Ptr &input_cloud, PointCloudXYZI::Ptr &trans_cloud);
   void pointBodyToWorld(const PointType &pi, PointType &po);
   void RGBpointBodyToWorld(PointType const *const pi, PointType *const po);
@@ -92,7 +95,7 @@ public:
   template <typename T> void pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi, Eigen::Matrix<T, 3, 1> &po);
   template <typename T> Eigen::Matrix<T, 3, 1> pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi);
 
-  // 图像帧处理
+  // 获取图像帧数据
   cv::Mat getImageFromMsg(const sensor_msgs::ImageConstPtr &img_msg);
 
   std::mutex mtx_buffer, mtx_buffer_imu_prop;
@@ -111,7 +114,7 @@ public:
   double res_mean_last = 0.05; // 地图分辨率
   double gyr_cov = 0, acc_cov = 0, inv_expo_cov = 0; // 陀螺仪，加计，曝光时间倒数协方差
   double blind_rgb_points = 0.0;
-  double last_timestamp_lidar = -1.0, last_timestamp_imu = -1.0, last_timestamp_img = -1.0;
+  double last_timestamp_lidar = -1.0, last_timestamp_imu = -1.0, last_timestamp_img = -1.0; // 上一次传感器的时间戳
   double filter_size_surf_min = 0; // 点云降采样 leaf size
   double filter_size_pcd = 0;
   double _first_lidar_time = 0.0;
@@ -133,7 +136,7 @@ public:
   nav_msgs::Odometry imu_prop_odom;
   ros::Publisher pubImuPropOdom;
   double imu_time_offset = 0.0;
-  double lidar_time_offset = 0.0;
+  double lidar_time_offset = 0.0; // 自定义时间偏移
 
   bool gravity_align_en = false; // 是否启用重力对齐
   bool gravity_align_finished = false;
@@ -145,7 +148,7 @@ public:
   int img_en = 1, imu_int_frame = 3;
   bool normal_en = true;
   bool exposure_estimate_en = false;
-  double exposure_time_init = 0.0;
+  double exposure_time_init = 0.0; // 曝光时间延迟
   bool inverse_composition_en = false;
   bool raycast_en = false;
   int lidar_en = 1;
@@ -154,7 +157,7 @@ public:
   double outlier_threshold;
   double plot_time;
   int frame_cnt;
-  double img_time_offset = 0.0;
+  double img_time_offset = 0.0;　 // 自定义图像时间偏移
   deque<PointCloudXYZI::Ptr> lid_raw_data_buffer; // 原始LiDAR数据
   deque<double> lid_header_time_buffer;
   deque<sensor_msgs::Imu::ConstPtr> imu_buffer; // imu 缓存
