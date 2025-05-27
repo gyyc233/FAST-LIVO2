@@ -206,6 +206,7 @@ public:
   }
 
   /// @brief 基于一组点计算主成分与协方差，拟合平面
+  /// @note 激光平面的不确定性 https://blog.csdn.net/lovely_yoshino/article/details/127735233
   /// @param points 
   /// @param plane 
   void init_plane(const std::vector<pointWithVar> &points, VoxelPlane *plane);

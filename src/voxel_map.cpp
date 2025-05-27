@@ -93,7 +93,7 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
   Eigen::Vector3d evecMid = evecs.real().col(evalsMid);
   Eigen::Vector3d evecMax = evecs.real().col(evalsMax); // 最大特征值对应平面主方向
 
-  // 构建残差jacobian
+  // 构建残差jacobian（平面中心对位置点）points[i].point_w求偏导
   Eigen::Matrix3d J_Q;
   J_Q << 1.0 / plane->points_size_, 0, 0, 0, 1.0 / plane->points_size_, 0, 0, 0, 1.0 / plane->points_size_;
   // && evalsReal(evalsMid) > 0.05
@@ -101,6 +101,9 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
   // 如果最小特征值小于阈值，则认为该点集构成一个“平面”
   if (evalsReal(evalsMin) < planer_threshold_)
   {
+    // 平面可以表示为它的法向量n, 它是与A(点的协方差矩阵：41行)的最小特征值相关联的特征向量
+    // 取平面上点q, 那么法向量n与q可以用位置点与点的位置点的噪声函数f进行估计
+    // jacobian为n,q对位置点求偏导 https://blog.csdn.net/lovely_yoshino/article/details/127735233
     for (int i = 0; i < points.size(); i++)
     {
       Eigen::Matrix<double, 6, 3> J;
@@ -109,6 +112,7 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
       {
         if (m != (int)evalsMin)
         {
+          // 法向量n对points[i].point_w求偏导
           Eigen::Matrix<double, 1, 3> F_m =
               (points[i].point_w - plane->center_).transpose() / ((plane->points_size_) * (evalsReal[evalsMin] - evalsReal[m])) *
               (evecs.real().col(m) * evecs.real().col(evalsMin).transpose() + evecs.real().col(evalsMin) * evecs.real().col(m).transpose());
@@ -121,21 +125,26 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
           F.row(m) = F_m;
         }
       }
-      J.block<3, 3>(0, 0) = evecs.real() * F;
+      J.block<3, 3>(0, 0) = evecs.real() * F; // evecs.real()是特征向量矩阵
       J.block<3, 3>(3, 0) = J_Q;
-      plane->plane_var_ += J * points[i].var * J.transpose();
+      plane->plane_var_ += J * points[i].var * J.transpose(); // 将点的不确定性映射到平面模型
     }
 
-    plane->normal_ << evecs.real()(0, evalsMin), evecs.real()(1, evalsMin), evecs.real()(2, evalsMin);
+    plane->normal_ << evecs.real()(0, evalsMin), evecs.real()(1, evalsMin), evecs.real()(2, evalsMin); // update plane normal vector
     plane->y_normal_ << evecs.real()(0, evalsMid), evecs.real()(1, evalsMid), evecs.real()(2, evalsMid);
-    plane->x_normal_ << evecs.real()(0, evalsMax), evecs.real()(1, evalsMax), evecs.real()(2, evalsMax);
+    plane->x_normal_ << evecs.real()(0, evalsMax), evecs.real()(1, evalsMax), evecs.real()(2, evalsMax); // 平面点云主方向
+    // 三个方向的特征值
     plane->min_eigen_value_ = evalsReal(evalsMin);
     plane->mid_eigen_value_ = evalsReal(evalsMid);
     plane->max_eigen_value_ = evalsReal(evalsMax);
+    // 平面点云半径，表示平面在主方向上的扩展程度，使用最大特征值的平方根来估算
     plane->radius_ = sqrt(evalsReal(evalsMax));
+    // 平面到原点的距离
     plane->d_ = -(plane->normal_(0) * plane->center_(0) + plane->normal_(1) * plane->center_(1) + plane->normal_(2) * plane->center_(2));
     plane->is_plane_ = true;
     plane->is_update_ = true;
+
+    // 该平面已被初始化
     if (!plane->is_init_)
     {
       plane->id_ = voxel_plane_id;
