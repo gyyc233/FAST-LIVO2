@@ -19,17 +19,27 @@ void calcBodyCov(Eigen::Vector3d &pb, const float range_inc, const float degree_
   float range_var = range_inc * range_inc;
   Eigen::Matrix2d direction_var;
   direction_var << pow(sin(DEG2RAD(degree_inc)), 2), 0, 0, pow(sin(DEG2RAD(degree_inc)), 2);
+
+  // 该点的方向向量以及反对称矩阵
   Eigen::Vector3d direction(pb);
   direction.normalize();
   Eigen::Matrix3d direction_hat;
   direction_hat << 0, -direction(2), direction(1), direction(2), 0, -direction(0), -direction(1), direction(0), 0;
+
+  // 创建两个与方向向量正交的向量，构成局部坐标系 base_vector1 base_vector2
   Eigen::Vector3d base_vector1(1, 1, -(direction(0) + direction(1)) / direction(2));
   base_vector1.normalize();
   Eigen::Vector3d base_vector2 = base_vector1.cross(direction);
   base_vector2.normalize();
+
+  // 使用正交基构造旋转矩阵A
+  // https://arxiv.org/pdf/2103.01627
   Eigen::Matrix<double, 3, 2> N;
   N << base_vector1(0), base_vector2(0), base_vector1(1), base_vector2(1), base_vector1(2), base_vector2(2);
+
+  // 计算角度测量协方差矩阵 https://arxiv.org/pdf/2103.01627
   Eigen::Matrix<double, 3, 2> A = range * direction_hat * N;
+  // 方向测量引起的协方差+角度测量引起的协方差
   cov = direction * range_var * direction.transpose() + A * direction_var * A.transpose();
 }
 
@@ -54,6 +64,7 @@ void loadVoxelConfig(ros::NodeHandle &nh, VoxelMapConfig &voxel_config)
 
 void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPlane *plane)
 {
+  // 1. 计算points质心与协方差矩阵
   plane->plane_var_ = Eigen::Matrix<double, 6, 6>::Zero();
   plane->covariance_ = Eigen::Matrix3d::Zero();
   plane->center_ = Eigen::Vector3d::Zero();
@@ -67,6 +78,8 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
   }
   plane->center_ = plane->center_ / plane->points_size_;
   plane->covariance_ = plane->covariance_ / plane->points_size_ - plane->center_ * plane->center_.transpose();
+
+  // 2. 对一组点进行PCA分解
   Eigen::EigenSolver<Eigen::Matrix3d> es(plane->covariance_);
   Eigen::Matrix3cd evecs = es.eigenvectors();
   Eigen::Vector3cd evals = es.eigenvalues();
@@ -76,13 +89,16 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
   evalsReal.rowwise().sum().minCoeff(&evalsMin);
   evalsReal.rowwise().sum().maxCoeff(&evalsMax);
   int evalsMid = 3 - evalsMin - evalsMax;
-  Eigen::Vector3d evecMin = evecs.real().col(evalsMin);
+  Eigen::Vector3d evecMin = evecs.real().col(evalsMin); // 最小特征值对应平面法向量
   Eigen::Vector3d evecMid = evecs.real().col(evalsMid);
-  Eigen::Vector3d evecMax = evecs.real().col(evalsMax);
+  Eigen::Vector3d evecMax = evecs.real().col(evalsMax); // 最大特征值对应平面主方向
+
+  // 构建残差jacobian
   Eigen::Matrix3d J_Q;
   J_Q << 1.0 / plane->points_size_, 0, 0, 0, 1.0 / plane->points_size_, 0, 0, 0, 1.0 / plane->points_size_;
   // && evalsReal(evalsMid) > 0.05
   //&& evalsReal(evalsMid) > 0.01
+  // 如果最小特征值小于阈值，则认为该点集构成一个“平面”
   if (evalsReal(evalsMin) < planer_threshold_)
   {
     for (int i = 0; i < points.size(); i++)
