@@ -138,7 +138,7 @@ struct DS_POINT
 };
 
 /// @brief 计算 LiDAR 点在 body 坐标系（LiDAR 原始点所在坐标系）下的协方差矩阵
-/// @note 涉及激光点不确定度计算 https://arxiv.org/pdf/2103.01627
+/// @note 涉及激光点测量不确定度计算 https://arxiv.org/pdf/2103.01627
 /// @param pb 
 /// @param range_inc 距离测量标准差
 /// @param degree_inc 角度测量误差
@@ -161,7 +161,7 @@ public:
 
   VoxelOctoTree *leaves_[8]; //当前节点的子节点指针数组
 
-  double voxel_center_[3]; // x, y, z 体素中心
+  double voxel_center_[3]; // x, y, z 当前节点体素中心
   std::vector<int> layer_init_num_;
   float quater_length_; // 体素边长的1/4
   float planer_threshold_; // 平面阈值
@@ -214,13 +214,14 @@ public:
   /// @brief 基于当前节点内点数量决定是否划分为8个子节点
   void init_octo_tree();
 
+  // 将当前节点分割为8个子节点并递归对每个子节点进行平面拟合或进一步细分
   void cut_octo_tree();
 
   /// @brief 将一个新的点插入到合适的子节点中，如果是叶子节点且未满，直接加入；否则递归查找或分裂
   /// @param pv 
   void UpdateOctoTree(const pointWithVar &pv);
 
-  /// @brief 查找世界坐标pw所在的八叉树叶子节点
+  /// @brief 查找世界坐标pw最接近的的八叉树叶子节点
   /// @param pw 
   /// @return 
   VoxelOctoTree *find_correspond(Eigen::Vector3d pw);
@@ -263,8 +264,8 @@ public:
   geometry_msgs::Quaternion geoQuat_;
 
   int feats_down_size_;
-  int effct_feat_num_;
-  std::vector<M3D> cross_mat_list_;
+  int effct_feat_num_; // 计算残差时的有效点数量
+  std::vector<M3D> cross_mat_list_; // 世界坐标系下点的反对称矩阵
   std::vector<M3D> body_cov_list_;
   std::vector<pointWithVar> pv_list_;
   std::vector<PointToPlane> ptpl_list_;

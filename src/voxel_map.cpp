@@ -14,6 +14,7 @@ which is included as part of this source code package.
 
 void calcBodyCov(Eigen::Vector3d &pb, const float range_inc, const float degree_inc, Eigen::Matrix3d &cov)
 {
+  // 激光点的测量噪声
   if (pb[2] == 0) pb[2] = 0.0001;
   float range = sqrt(pb[0] * pb[0] + pb[1] * pb[1] + pb[2] * pb[2]);
   float range_var = range_inc * range_inc;
@@ -93,6 +94,7 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
   Eigen::Vector3d evecMid = evecs.real().col(evalsMid);
   Eigen::Vector3d evecMax = evecs.real().col(evalsMax); // 最大特征值对应平面主方向
 
+  // 平面不确定性建模
   // 构建残差jacobian（平面中心对位置点）points[i].point_w求偏导
   Eigen::Matrix3d J_Q;
   J_Q << 1.0 / plane->points_size_, 0, 0, 0, 1.0 / plane->points_size_, 0, 0, 0, 1.0 / plane->points_size_;
@@ -127,7 +129,7 @@ void VoxelOctoTree::init_plane(const std::vector<pointWithVar> &points, VoxelPla
       }
       J.block<3, 3>(0, 0) = evecs.real() * F; // evecs.real()是特征向量矩阵
       J.block<3, 3>(3, 0) = J_Q;
-      plane->plane_var_ += J * points[i].var * J.transpose(); // 将点的不确定性映射到平面模型
+      plane->plane_var_ += J * points[i].var * J.transpose(); // 平面协方差矩阵模型
     }
 
     plane->normal_ << evecs.real()(0, evalsMin), evecs.real()(1, evalsMin), evecs.real()(2, evalsMin); // update plane normal vector
@@ -166,19 +168,20 @@ void VoxelOctoTree::init_octo_tree()
     init_plane(temp_points_, plane_ptr_);
     if (plane_ptr_->is_plane_ == true)
     {
-      octo_state_ = 0;
+      octo_state_ = 0; // 当前节点是平面节点
       // new added
+      // 如果点数超过了最大允许点数 max_points_num_ 则紧枝后续更新
       if (temp_points_.size() > max_points_num_)
       {
         update_enable_ = false;
-        std::vector<pointWithVar>().swap(temp_points_);
+        std::vector<pointWithVar>().swap(temp_points_); // 清空 temp_points_
         new_points_ = 0;
       }
     }
     else
     {
-      octo_state_ = 1;
-      cut_octo_tree();
+      octo_state_ = 1; // 当前节点不是平面节点
+      cut_octo_tree(); // 将当前节点进一步划分为子节点（8个子八叉树节点）
     }
     init_octo_ = true;
     new_points_ = 0;
@@ -194,27 +197,37 @@ void VoxelOctoTree::cut_octo_tree()
   }
   for (size_t i = 0; i < temp_points_.size(); i++)
   {
+    // 判断点在 x、y、z 方向相对于中心的位置确定点属于那个叶子节点
     int xyz[3] = {0, 0, 0};
     if (temp_points_[i].point_w[0] > voxel_center_[0]) { xyz[0] = 1; }
     if (temp_points_[i].point_w[1] > voxel_center_[1]) { xyz[1] = 1; }
     if (temp_points_[i].point_w[2] > voxel_center_[2]) { xyz[2] = 1; }
-    int leafnum = 4 * xyz[0] + 2 * xyz[1] + xyz[2];
+
+    // 公式本质上是一个 二进制编码 转换为十进制
+    int leafnum = 4 * xyz[0] + 2 * xyz[1] + xyz[2]; // 子节点编号，取值范文0-7，表示8个不同子空间
+
+    // 若子节点不存在则创建新子节点
     if (leaves_[leafnum] == nullptr)
     {
       leaves_[leafnum] = new VoxelOctoTree(max_layer_, layer_ + 1, layer_init_num_[layer_ + 1], max_points_num_, planer_threshold_);
+      // 设置子节点的中心位置和尺寸
       leaves_[leafnum]->layer_init_num_ = layer_init_num_;
       leaves_[leafnum]->voxel_center_[0] = voxel_center_[0] + (2 * xyz[0] - 1) * quater_length_;
       leaves_[leafnum]->voxel_center_[1] = voxel_center_[1] + (2 * xyz[1] - 1) * quater_length_;
       leaves_[leafnum]->voxel_center_[2] = voxel_center_[2] + (2 * xyz[2] - 1) * quater_length_;
       leaves_[leafnum]->quater_length_ = quater_length_ / 2;
     }
+    // 插入点到对应子节点中
     leaves_[leafnum]->temp_points_.push_back(temp_points_[i]);
     leaves_[leafnum]->new_points_++;
   }
+
+  // 处理8叉树每个子节点
   for (uint i = 0; i < 8; i++)
   {
     if (leaves_[i] != nullptr)
     {
+      // 子节点数量合适则进行平面拟合
       if (leaves_[i]->temp_points_.size() > leaves_[i]->points_size_threshold_)
       {
         init_plane(leaves_[i]->temp_points_, leaves_[i]->plane_ptr_);
@@ -229,6 +242,7 @@ void VoxelOctoTree::cut_octo_tree()
             new_points_ = 0;
           }
         }
+        // 平面拟合失败则递归划分
         else
         {
           leaves_[i]->octo_state_ = 1;
@@ -245,12 +259,14 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
 {
   if (!init_octo_)
   {
+    // 节点尚未初始化（没有构建出平面或划分子节点）
     new_points_++;
     temp_points_.push_back(pv);
     if (temp_points_.size() > points_size_threshold_) { init_octo_tree(); }
   }
   else
   {
+    // 若当前节点是平面节点
     if (plane_ptr_->is_plane_)
     {
       if (update_enable_)
@@ -264,6 +280,7 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
         }
         if (temp_points_.size() >= max_points_num_)
         {
+          // 超过上限则后续不更新
           update_enable_ = false;
           std::vector<pointWithVar>().swap(temp_points_);
           new_points_ = 0;
@@ -278,6 +295,8 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
         if (pv.point_w[0] > voxel_center_[0]) { xyz[0] = 1; }
         if (pv.point_w[1] > voxel_center_[1]) { xyz[1] = 1; }
         if (pv.point_w[2] > voxel_center_[2]) { xyz[2] = 1; }
+
+        // 分配到所属子节点
         int leafnum = 4 * xyz[0] + 2 * xyz[1] + xyz[2];
         if (leaves_[leafnum] != nullptr) { leaves_[leafnum]->UpdateOctoTree(pv); }
         else
@@ -291,7 +310,7 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
           leaves_[leafnum]->UpdateOctoTree(pv);
         }
       }
-      else
+      else // 已达到最大深度
       {
         if (update_enable_)
         {
@@ -316,8 +335,10 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
 
 VoxelOctoTree *VoxelOctoTree::find_correspond(Eigen::Vector3d pw)
 {
+  // 若节点未初始化or是一个有效平面点or当前层数达到最大层数则返回自身
   if (!init_octo_ || plane_ptr_->is_plane_ || (layer_ >= max_layer_)) return this;
 
+  // 根据输入点 pw 在 x、y、z 方向相对于当前节点体素中心的位置，决定它属于哪个子节点
   int xyz[3] = {0, 0, 0};
   xyz[0] = pw[0] > voxel_center_[0] ? 1 : 0;
   xyz[1] = pw[1] > voxel_center_[1] ? 1 : 0;
@@ -338,13 +359,16 @@ VoxelOctoTree *VoxelOctoTree::Insert(const pointWithVar &pv)
     return this;
   }
 
+  // 当前节点已初始化但不是平面节点，且层数小于最大允许层数，可以继续细分
   if (init_octo_ && (!plane_ptr_->is_plane_) && (layer_ < max_layer_))
   {
+    // 计算子节点编号
     int xyz[3] = {0, 0, 0};
     xyz[0] = pv.point_w[0] > voxel_center_[0] ? 1 : 0;
     xyz[1] = pv.point_w[1] > voxel_center_[1] ? 1 : 0;
     xyz[2] = pv.point_w[2] > voxel_center_[2] ? 1 : 0;
     int leafnum = 4 * xyz[0] + 2 * xyz[1] + xyz[2];
+
     if (leaves_[leafnum] != nullptr) { return leaves_[leafnum]->Insert(pv); }
     else
     {
@@ -371,13 +395,17 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
   // ekf_time = 0.0;
   // double t0 = omp_get_wtime();
 
+  // 1. 将点转到世界坐标系并计算点的测量协方差与反对称矩阵
   for (size_t i = 0; i < feats_down_body_->size(); i++)
   {
     V3D point_this(feats_down_body_->points[i].x, feats_down_body_->points[i].y, feats_down_body_->points[i].z);
     if (point_this[2] == 0) { point_this[2] = 0.001; }
-    M3D var;
+    
+    M3D var; // 基于点不确定度计算后的协方差矩阵
     calcBodyCov(point_this, config_setting_.dept_err_, config_setting_.beam_err_, var);
     body_cov_list_.push_back(var);
+
+    // 将点从body转到imu标系
     point_this = extR_ * point_this + extT_;
     M3D point_crossmat;
     point_crossmat << SKEW_SYM_MATRX(point_this);
@@ -398,6 +426,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
   {
     double total_residual = 0.0;
     pcl::PointCloud<pcl::PointXYZI>::Ptr world_lidar(new pcl::PointCloud<pcl::PointXYZI>);
+    // 将feats_down_body_点从body坐标系转到世界坐标系
     TransformLidar(state_.rot_end, state_.pos_end, feats_down_body_, world_lidar);
     M3D rot_var = state_.cov.block<3, 3>(0, 0);
     M3D t_var = state_.cov.block<3, 3>(3, 3);
@@ -407,8 +436,14 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
       pv.point_b << feats_down_body_->points[i].x, feats_down_body_->points[i].y, feats_down_body_->points[i].z;
       pv.point_w << world_lidar->points[i].x, world_lidar->points[i].y, world_lidar->points[i].z;
 
+      // 雷达坐标系下点的误差协方差矩阵
       M3D cov = body_cov_list_[i];
+      // 世界坐标系下点坐标构成的反对称矩阵
       M3D point_crossmat = cross_mat_list_[i];
+
+      // 这里和引用文献中使用的公式不一致
+      // https://github.com/hku-mars/FAST-LIVO2/issues/89
+      // 2. 计算点在世界坐标系下的协方差
       cov = state_.rot_end * cov * state_.rot_end.transpose() + (-point_crossmat) * rot_var * (-point_crossmat.transpose()) + t_var;
       pv.var = cov;
       pv.body_var = body_cov_list_[i];
@@ -417,6 +452,8 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
     // double t1 = omp_get_wtime();
 
+    // 基于世界坐标系下的当前帧点云，构建残差列表
+    // 残差：点到平面模型的距离
     BuildResidualListOMP(pv_list_, ptpl_list_);
 
     // build_residual_time += omp_get_wtime() - t1;
@@ -425,6 +462,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     {
       total_residual += fabs(ptpl_list_[i].dis_to_plane_);
     }
+
     effct_feat_num_ = ptpl_list_.size();
     cout << "[ LIO ] Raw feature num: " << feats_undistort_->size() << ", downsampled feature num:" << feats_down_size_ 
          << " effective feature num: " << effct_feat_num_ << " average residual: " << total_residual / effct_feat_num_ << endl;
@@ -440,6 +478,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     {
       auto &ptpl = ptpl_list_[i];
       V3D point_this(ptpl.point_b_);
+      // body坐标系转为imu坐标系
       point_this = extR_ * point_this + extT_;
       V3D point_body(ptpl.point_b_);
       M3D point_crossmat;
@@ -447,7 +486,9 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
       /*** get the normal vector of closest surface/corner ***/
 
+      // imu坐标系转世界坐标系
       V3D point_world = state_propagat.rot_end * point_this + state_propagat.pos_end;
+      // 对应 Efficient and Probabilistic Adaptive Voxel Mapping for Accurate Online LiDAR Odometry (11)式子
       Eigen::Matrix<double, 1, 6> J_nq;
       J_nq.block<1, 3>(0, 0) = point_world - ptpl_list_[i].center_;
       J_nq.block<1, 3>(0, 3) = -ptpl_list_[i].normal_;
@@ -467,10 +508,14 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
       //       state_propagat.cov.block<3, 3>(3, 3) - point_crossmat * state_propagat.cov.block<3, 3>(0, 0) * point_crossmat;
 
       // point_body cov
+      // 将body坐标系下原始协方差通过旋转变换转换到世界坐标系
       var = state_propagat.rot_end * extR_ * ptpl_list_[i].body_cov_ * (state_propagat.rot_end * extR_).transpose();
 
+      // 对应 Efficient and Probabilistic Adaptive Voxel Mapping for Accurate Online LiDAR Odometry (11)式子
+      // 平面模型方差使用jacobian进行加权，计算其不确定度
       double sigma_l = J_nq * ptpl_list_[i].plane_var_ * J_nq.transpose();
 
+      // 计算协方差逆矩阵
       R_inv(i) = 1.0 / (0.001 + sigma_l + ptpl_list_[i].normal_.transpose() * var * ptpl_list_[i].normal_);
       // R_inv(i) = 1.0 / (sigma_l + ptpl_list_[i].normal_.transpose() * var * ptpl_list_[i].normal_);
 
@@ -481,6 +526,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
           ptpl_list_[i].normal_[1] * R_inv(i), ptpl_list_[i].normal_[2] * R_inv(i);
       meas_vec(i) = -ptpl_list_[i].dis_to_plane_;
     }
+
     EKF_stop_flg = false;
     flg_EKF_converged = false;
     /*** Iterative Kalman Filter Update ***/
@@ -493,6 +539,8 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     MD(DIM_STATE, DIM_STATE) &&K_1 = (H_T_H.block<DIM_STATE, DIM_STATE>(0, 0) + state_.cov.block<DIM_STATE, DIM_STATE>(0, 0).inverse()).inverse();
     G.block<DIM_STATE, 6>(0, 0) = K_1.block<DIM_STATE, 6>(0, 0) * H_T_H.block<6, 6>(0, 0);
     auto vec = state_propagat - state_;
+
+    // solution 状态变量最大后验估计
     VD(DIM_STATE)
     solution = K_1.block<DIM_STATE, 6>(0, 0) * HTz + vec.block<DIM_STATE, 1>(0, 0) - G.block<DIM_STATE, 6>(0, 0) * vec.block<6, 1>(0, 0);
     int minRow, minCol;
