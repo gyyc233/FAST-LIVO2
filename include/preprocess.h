@@ -132,13 +132,30 @@ namespace Pandar128_ros
 struct EIGEN_ALIGN16 Point
 {
   PCL_ADD_POINT4D;
-  float timestamp;
-  uint8_t ring;
+  uint8_t intensity;
+  double timestamp;
+  uint16_t ring;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 } // namespace Pandar128_ros
 POINT_CLOUD_REGISTER_POINT_STRUCT(Pandar128_ros::Point,
-                                  (float, x, x)(float, y, y)(float, z, z)(float, timestamp, timestamp))
+                                  (float, x, x)(float, y, y)(float, z, z)(std::uint8_t, intensity, intensity)(double, timestamp, timestamp)(std::uint16_t, ring, ring))
+/*****************/
+
+/*** Robosense_Airy ***/
+namespace robosense_ros
+{
+struct EIGEN_ALIGN16 Point
+{
+  PCL_ADD_POINT4D;
+  float intensity;
+  double timestamp;
+  uint16_t ring;
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+};
+} // namespace robosense_ros
+POINT_CLOUD_REGISTER_POINT_STRUCT(robosense_ros::Point,
+                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(double, timestamp, timestamp)(std::uint16_t, ring, ring))
 /*****************/
 
 // LiDAR 数据预处理
@@ -190,6 +207,7 @@ private:
   void velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void xt32_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void Pandar128_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
+  void robosense_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void l515_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
 
   // 为点云中的每个点分配几何特征，打标签
