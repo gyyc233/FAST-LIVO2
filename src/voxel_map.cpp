@@ -489,6 +489,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
       // imu坐标系转世界坐标系
       V3D point_world = state_propagat.rot_end * point_this + state_propagat.pos_end;
       // 对应 Efficient and Probabilistic Adaptive Voxel Mapping for Accurate Online LiDAR Odometry (11)式子
+      // 注意，这里舍弃了第三项法向量
       Eigen::Matrix<double, 1, 6> J_nq;
       J_nq.block<1, 3>(0, 0) = point_world - ptpl_list_[i].center_;
       J_nq.block<1, 3>(0, 3) = -ptpl_list_[i].normal_;
@@ -520,33 +521,64 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
       // R_inv(i) = 1.0 / (sigma_l + ptpl_list_[i].normal_.transpose() * var * ptpl_list_[i].normal_);
 
       /*** calculate the Measuremnt Jacobian matrix H ***/
+
+      // A矩阵表示由旋转引起的变化,参考voxelmap式子1
       V3D A(point_crossmat * state_.rot_end.transpose() * ptpl_list_[i].normal_);
+      // 每一行 Hsub 包括两部分: 由旋转引起的 A 向量（前三列）,平面法向量（后三列）
+      // 注意，这里舍弃了第三项法向量
       Hsub.row(i) << VEC_FROM_ARRAY(A), ptpl_list_[i].normal_[0], ptpl_list_[i].normal_[1], ptpl_list_[i].normal_[2];
+
+      // 构造 H^T * R^{-1} 矩阵（观测雅可比矩阵乘以测量协方差逆矩阵），用于后续卡尔曼增益计算
       Hsub_T_R_inv.col(i) << A[0] * R_inv(i), A[1] * R_inv(i), A[2] * R_inv(i), ptpl_list_[i].normal_[0] * R_inv(i),
           ptpl_list_[i].normal_[1] * R_inv(i), ptpl_list_[i].normal_[2] * R_inv(i);
+
+      // 存储当前点到平面的距离作为测量残差
       meas_vec(i) = -ptpl_list_[i].dis_to_plane_;
     }
 
     EKF_stop_flg = false;
-    flg_EKF_converged = false;
+    flg_EKF_converged = false; // EKF 是否已经收敛
     /*** Iterative Kalman Filter Update ***/
+    // IEKF K的计算，用的高位观测等效处理方法
     MatrixXd K(DIM_STATE, effct_feat_num_);
     // auto &&Hsub_T = Hsub.transpose();
     auto &&HTz = Hsub_T_R_inv * meas_vec;
     // fout_dbg<<"HTz: "<<HTz<<endl;
+    
+    // 构建信息矩阵的一部分：$ H^T R^{-1} H $
+    // 这是卡尔曼增益计算中的关键部分，代表观测对状态估计的影响
     H_T_H.block<6, 6>(0, 0) = Hsub_T_R_inv * Hsub;
     // EigenSolver<Matrix<double, 6, 6>> es(H_T_H.block<6,6>(0,0));
+
+    // H_T_H.block<DIM_STATE, DIM_STATE>(0, 0) 是观测的信息矩阵
+    // state_.cov.block<DIM_STATE, DIM_STATE>(0, 0).inverse() 是预测状态协方差的逆
+    // 整体公式 K = (H^T R^{-1} H + P^{-1})^{-1}
     MD(DIM_STATE, DIM_STATE) &&K_1 = (H_T_H.block<DIM_STATE, DIM_STATE>(0, 0) + state_.cov.block<DIM_STATE, DIM_STATE>(0, 0).inverse()).inverse();
+
+    // 构建中间矩阵 G，用于后续的状态更新
+    // 这一步实际上是：G = K * (H^T R^{-1} H)
+    // TODO: 这里为什么是乘 H_T_H.block<DIM_STATE, DIM_STATE>(0, 0)而不是乘Hsub_T_R_inv，发现在计算solution的时候乘HTz回去了
     G.block<DIM_STATE, 6>(0, 0) = K_1.block<DIM_STATE, 6>(0, 0) * H_T_H.block<6, 6>(0, 0);
+
+    // vec 是预测状态与当前状态之间的差异
     auto vec = state_propagat - state_;
 
     // solution 状态变量最大后验估计
     VD(DIM_STATE)
     solution = K_1.block<DIM_STATE, 6>(0, 0) * HTz + vec.block<DIM_STATE, 1>(0, 0) - G.block<DIM_STATE, 6>(0, 0) * vec.block<6, 1>(0, 0);
+    // K_1.block<DIM_STATE, 6>(0, 0) * HTz 是基于观测的修正项
+    // vec 是预测与实际状态的偏差
+    // G * vec 是预测误差的加权修正
+
     int minRow, minCol;
+    // 将计算出的 solution 加到当前状态上，完成状态更新
     state_ += solution;
+
+    // 提取旋转和平移增量
     auto rot_add = solution.block<3, 1>(0, 0);
     auto t_add = solution.block<3, 1>(3, 0);
+
+    // 如果旋转和平移的变化足够小，则认为 EKF 收敛
     if ((rot_add.norm() * 57.3 < 0.01) && (t_add.norm() * 100 < 0.015)) { flg_EKF_converged = true; }
     V3D euler_cur = state_.rot_end.eulerAngles(2, 1, 0);
 
