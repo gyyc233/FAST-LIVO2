@@ -509,14 +509,14 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
       //       state_propagat.cov.block<3, 3>(3, 3) - point_crossmat * state_propagat.cov.block<3, 3>(0, 0) * point_crossmat;
 
       // point_body cov
-      // 将body坐标系下原始协方差通过旋转变换转换到世界坐标系
+      // 将body坐标系下lidar点原始协方差通过旋转变换转换到世界坐标系
       var = state_propagat.rot_end * extR_ * ptpl_list_[i].body_cov_ * (state_propagat.rot_end * extR_).transpose();
 
-      // 对应 Efficient and Probabilistic Adaptive Voxel Mapping for Accurate Online LiDAR Odometry (11)式子
+      // 对应 Efficient and Probabilistic Adaptive Voxel Mapping for Accurate Online LiDAR Odometry (13)式子R矩阵计算
       // 平面模型方差使用jacobian进行加权，计算其不确定度
       double sigma_l = J_nq * ptpl_list_[i].plane_var_ * J_nq.transpose();
 
-      // 计算协方差逆矩阵
+      // 以上两种协方差相加，得到测量方程的总协方差
       R_inv(i) = 1.0 / (0.001 + sigma_l + ptpl_list_[i].normal_.transpose() * var * ptpl_list_[i].normal_);
       // R_inv(i) = 1.0 / (sigma_l + ptpl_list_[i].normal_.transpose() * var * ptpl_list_[i].normal_);
 
@@ -528,7 +528,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
       // 注意，这里舍弃了第三项法向量
       Hsub.row(i) << VEC_FROM_ARRAY(A), ptpl_list_[i].normal_[0], ptpl_list_[i].normal_[1], ptpl_list_[i].normal_[2];
 
-      // 构造 H^T * R^{-1} 矩阵（观测雅可比矩阵乘以测量协方差逆矩阵），用于后续卡尔曼增益计算
+      // IEFK公式 构造 H^T * R^{-1} 矩阵（观测雅可比矩阵转置乘以测量协方差逆矩阵），用于后续卡尔曼增益计算
       Hsub_T_R_inv.col(i) << A[0] * R_inv(i), A[1] * R_inv(i), A[2] * R_inv(i), ptpl_list_[i].normal_[0] * R_inv(i),
           ptpl_list_[i].normal_[1] * R_inv(i), ptpl_list_[i].normal_[2] * R_inv(i);
 
@@ -542,6 +542,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     // IEKF K的计算，用的高位观测等效处理方法
     MatrixXd K(DIM_STATE, effct_feat_num_);
     // auto &&Hsub_T = Hsub.transpose();
+    // $ H^T R^{-1} r(点到平面残差) $
     auto &&HTz = Hsub_T_R_inv * meas_vec;
     // fout_dbg<<"HTz: "<<HTz<<endl;
     
@@ -552,7 +553,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
     // H_T_H.block<DIM_STATE, DIM_STATE>(0, 0) 是观测的信息矩阵
     // state_.cov.block<DIM_STATE, DIM_STATE>(0, 0).inverse() 是预测状态协方差的逆
-    // 整体公式 K = (H^T R^{-1} H + P^{-1})^{-1}
+    // IEFK kalman gain 整体公式 K = (H^T R^{-1} H + P^{-1})^{-1}
     MD(DIM_STATE, DIM_STATE) &&K_1 = (H_T_H.block<DIM_STATE, DIM_STATE>(0, 0) + state_.cov.block<DIM_STATE, DIM_STATE>(0, 0).inverse()).inverse();
 
     // 构建中间矩阵 G，用于后续的状态更新
@@ -563,7 +564,8 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     // vec 是预测状态与当前状态之间的差异
     auto vec = state_propagat - state_;
 
-    // solution 状态变量最大后验估计
+    // solution 状态变量最大后验估计 \delta x_k
+    // https://github.com/hku-mars/FAST-LIVO2/issues/301
     VD(DIM_STATE)
     solution = K_1.block<DIM_STATE, 6>(0, 0) * HTz + vec.block<DIM_STATE, 1>(0, 0) - G.block<DIM_STATE, 6>(0, 0) * vec.block<6, 1>(0, 0);
     // K_1.block<DIM_STATE, 6>(0, 0) * HTz 是基于观测的修正项
@@ -571,7 +573,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     // G * vec 是预测误差的加权修正
 
     int minRow, minCol;
-    // 将计算出的 solution 加到当前状态上，完成状态更新
+    // 将计算出的 solution \delta x_k 加到当前状态上，完成本次迭代状态更新
     state_ += solution;
 
     // 提取旋转和平移增量
@@ -586,11 +588,14 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
     if (flg_EKF_converged || ((rematch_num == 0) && (iterCount == (config_setting_.max_iterations_ - 2)))) { rematch_num++; }
 
+    // IEKF 迭代次数达到最大值或者 EKF 收敛时，更新协方差
+    // 再更新位置
+    // 整个IEKF完成
     /*** Convergence Judgements and Covariance Update ***/
     if (!EKF_stop_flg && (rematch_num >= 2 || (iterCount == config_setting_.max_iterations_ - 1)))
     {
       /*** Covariance Update ***/
-      // _state.cov = (I_STATE - G) * _state.cov;
+      // _state.cov = (I_STATE - G) * _state.cov; TODO: 这里可以看看到G变量的定义
       state_.cov.block<DIM_STATE, DIM_STATE>(0, 0) =
           (I_STATE.block<DIM_STATE, DIM_STATE>(0, 0) - G.block<DIM_STATE, DIM_STATE>(0, 0)) * state_.cov.block<DIM_STATE, DIM_STATE>(0, 0);
       // total_distance += (_state.pos_end - position_last).norm();
