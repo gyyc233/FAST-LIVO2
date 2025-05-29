@@ -629,6 +629,8 @@ void VoxelMapManager::TransformLidar(const Eigen::Matrix3d rot, const Eigen::Vec
   {
     pcl::PointXYZINormal p_c = input_cloud->points[i];
     Eigen::Vector3d p(p_c.x, p_c.y, p_c.z);
+    // extR_ extT_ body转imu坐标系
+    // rot t imu转world
     p = (rot * (extR_ * p + extT_) + t);
     pcl::PointXYZI pi;
     pi.x = p(0);
@@ -654,12 +656,17 @@ void VoxelMapManager::BuildVoxelMap()
     pointWithVar pv;
     pv.point_w << feats_down_world_->points[i].x, feats_down_world_->points[i].y, feats_down_world_->points[i].z;
     V3D point_this(feats_down_body_->points[i].x, feats_down_body_->points[i].y, feats_down_body_->points[i].z);
-    M3D var;
+    M3D var; // body 点不确定度协方差矩阵
     calcBodyCov(point_this, config_setting_.dept_err_, config_setting_.beam_err_, var);
     M3D point_crossmat;
     point_crossmat << SKEW_SYM_MATRX(point_this);
+
+    // (state_.rot_end * extR_) * var * (state_.rot_end * extR_).transpose() 通过旋转矩阵将原始协方差变换到世界坐标系
+    // (-point_crossmat) * state_.cov.block<3, 3>(0, 0) * (-point_crossmat).transpose()：考虑了由于方向估计误差导致的协方差变化
+    // state_.cov.block<3, 3>(3, 3)：加上状态估计中的平移部分带来的协方差
     var = (state_.rot_end * extR_) * var * (state_.rot_end * extR_).transpose() +
           (-point_crossmat) * state_.cov.block<3, 3>(0, 0) * (-point_crossmat).transpose() + state_.cov.block<3, 3>(3, 3);
+    // 这里方差应该是偏大的
     pv.var = var;
     input_points.push_back(pv);
   }
@@ -671,19 +678,26 @@ void VoxelMapManager::BuildVoxelMap()
     float loc_xyz[3];
     for (int j = 0; j < 3; j++)
     {
+      // 将点的世界坐标除以 voxel_size，得到它在各个轴上的体素索引
       loc_xyz[j] = p_v.point_w[j] / voxel_size;
+
+      // 如果索引为负数（即点位于原点负方向），则减去 1.0 来确保向下取整时不会出错，避免 -0.1 被错误地映射到 0 体素
       if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
     }
+    // 确定该点体素ID
     VOXEL_LOCATION position((int64_t)loc_xyz[0], (int64_t)loc_xyz[1], (int64_t)loc_xyz[2]);
     auto iter = voxel_map_.find(position);
     if (iter != voxel_map_.end())
     {
+      // 若position体素已存在则将点添加到temp_points_
       voxel_map_[position]->temp_points_.push_back(p_v);
-      voxel_map_[position]->new_points_++;
+      voxel_map_[position]->new_points_++; // 该节点中新加入的点数量
     }
     else
     {
       VoxelOctoTree *octo_tree = new VoxelOctoTree(max_layer, 0, layer_init_num[0], max_points_num, planer_threshold);
+
+      // 将新建的八叉树插入到体素地图，以position为key
       voxel_map_[position] = octo_tree;
       voxel_map_[position]->quater_length_ = voxel_size / 4;
       voxel_map_[position]->voxel_center_[0] = (0.5 + position.x) * voxel_size;
@@ -702,6 +716,7 @@ void VoxelMapManager::BuildVoxelMap()
 
 V3F VoxelMapManager::RGBFromVoxel(const V3D &input_point)
 {
+  // 点映射到对应的体素格子并给体素赋予颜色
   int64_t loc_xyz[3];
   for (int j = 0; j < 3; j++)
   {
@@ -778,6 +793,8 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
       loc_xyz[j] = pv.point_w[j] / voxel_size;
       if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
     }
+    
+    // 计算当前点所在的世界坐标系下的体素位置 position 
     VOXEL_LOCATION position((int64_t)loc_xyz[0], (int64_t)loc_xyz[1], (int64_t)loc_xyz[2]);
     auto iter = voxel_map_.find(position);
     if (iter != voxel_map_.end())
@@ -785,10 +802,15 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
       VoxelOctoTree *current_octo = iter->second;
       PointToPlane single_ptpl;
       bool is_sucess = false;
-      double prob = 0;
+      double prob = 0; // 概率值，筛选最匹配平面
+      // 计算当前点pv到该体素中平面的距离（即为残差）
       build_single_residual(pv, current_octo, 0, is_sucess, prob, single_ptpl);
+
+      // 若失败则搜索邻近区域
       if (!is_sucess)
       {
+        // 根据当前点是否超出了当前体素的范围（使用 voxel_center_ 和 quater_length_ 计算边界），决定是否要查找相邻体素
+        // 每个方向上只查找一个最近的邻居体素
         VOXEL_LOCATION near_position = position;
         if (loc_xyz[0] > (current_octo->voxel_center_[0] + current_octo->quater_length_)) { near_position.x = near_position.x + 1; }
         else if (loc_xyz[0] < (current_octo->voxel_center_[0] - current_octo->quater_length_)) { near_position.x = near_position.x - 1; }
@@ -796,11 +818,14 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
         else if (loc_xyz[1] < (current_octo->voxel_center_[1] - current_octo->quater_length_)) { near_position.y = near_position.y - 1; }
         if (loc_xyz[2] > (current_octo->voxel_center_[2] + current_octo->quater_length_)) { near_position.z = near_position.z + 1; }
         else if (loc_xyz[2] < (current_octo->voxel_center_[2] - current_octo->quater_length_)) { near_position.z = near_position.z - 1; }
+
+        // 如果邻近体素也存在于地图中，则再次调用 build_single_residual 查找该体素中的平面并计算残差
         auto iter_near = voxel_map_.find(near_position);
         if (iter_near != voxel_map_.end()) { build_single_residual(pv, iter_near->second, 0, is_sucess, prob, single_ptpl); }
       }
       if (is_sucess)
       {
+        // 成功则保留残差信息
         mylock.lock();
         useful_ptpl[i] = true;
         all_ptpl_list[i] = single_ptpl;
@@ -808,6 +833,7 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
       }
       else
       {
+        // 标记为无效残差点
         mylock.lock();
         useful_ptpl[i] = false;
         mylock.unlock();

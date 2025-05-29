@@ -295,6 +295,13 @@ public:
 
   void BuildResidualListOMP(std::vector<pointWithVar> &pv_list, std::vector<PointToPlane> &ptpl_list);
 
+  /// @brief 递归查找当前点pv到最近平面模型的残差(点到平面距离)，并评估该距离是否符合几何与不确定性模型的要求
+  /// @param pv 
+  /// @param current_octo 
+  /// @param current_layer 
+  /// @param is_sucess 
+  /// @param prob 
+  /// @param single_ptpl 
   void build_single_residual(pointWithVar &pv, const VoxelOctoTree *current_octo, const int current_layer, bool &is_sucess, double &prob,
                              PointToPlane &single_ptpl);
 
