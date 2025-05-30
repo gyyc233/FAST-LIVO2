@@ -257,9 +257,9 @@ public:
   int scan_count = 0;
 
   StatesGroup state_;
-  V3D position_last_;
+  V3D position_last_;  // 当前体素地图中心位置
 
-  V3D last_slide_position = {0,0,0};
+  V3D last_slide_position = {0,0,0}; // 上一次滑窗中心位
 
   geometry_msgs::Quaternion geoQuat_;
 
@@ -296,12 +296,12 @@ public:
   void BuildResidualListOMP(std::vector<pointWithVar> &pv_list, std::vector<PointToPlane> &ptpl_list);
 
   /// @brief 递归查找当前点pv到最近平面模型的残差(点到平面距离)，并评估该距离是否符合几何与不确定性模型的要求
-  /// @param pv 
-  /// @param current_octo 
-  /// @param current_layer 
-  /// @param is_sucess 
-  /// @param prob 
-  /// @param single_ptpl 
+  /// @param pv 输入点（携带协方差）
+  /// @param current_octo 八叉树节点
+  /// @param current_layer 当前八叉树层级
+  /// @param is_sucess 是否找到有效平面
+  /// @param prob 匹配率
+  /// @param single_ptpl 匹配成功后输出的残差和平面模型信息
   void build_single_residual(pointWithVar &pv, const VoxelOctoTree *current_octo, const int current_layer, bool &is_sucess, double &prob,
                              PointToPlane &single_ptpl);
 
@@ -313,12 +313,14 @@ public:
   void clearMemOutOfMap(const int& x_max,const int& x_min,const int& y_max,const int& y_min,const int& z_max,const int& z_min );
 
 private:
+  // 递归从体素地图中提取最新平面数据
   void GetUpdatePlane(const VoxelOctoTree *current_octo, const int pub_max_voxel_layer, std::vector<VoxelPlane> &plane_list);
 
   void pubSinglePlane(visualization_msgs::MarkerArray &plane_pub, const std::string plane_ns, const VoxelPlane &single_plane, const float alpha,
                       const Eigen::Vector3d rgb);
   void CalcVectQuation(const Eigen::Vector3d &x_vec, const Eigen::Vector3d &y_vec, const Eigen::Vector3d &z_vec, geometry_msgs::Quaternion &q);
 
+  // 颜色映射
   void mapJet(double v, double vmin, double vmax, uint8_t &r, uint8_t &g, uint8_t &b);
 };
 typedef std::shared_ptr<VoxelMapManager> VoxelMapManagerPtr;

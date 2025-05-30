@@ -603,7 +603,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
       state_.cov.block<DIM_STATE, DIM_STATE>(0, 0) =
           (I_STATE.block<DIM_STATE, DIM_STATE>(0, 0) - G.block<DIM_STATE, DIM_STATE>(0, 0)) * state_.cov.block<DIM_STATE, DIM_STATE>(0, 0);
       // total_distance += (_state.pos_end - position_last).norm();
-      position_last_ = state_.pos_end;
+      position_last_ = state_.pos_end; // 记录当前位置，用于后续滑动窗口
       geoQuat_ = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
 
       // VD(DIM_STATE) K_sum  = K.rowwise().sum();
@@ -863,6 +863,8 @@ void VoxelMapManager::build_single_residual(pointWithVar &pv, const VoxelOctoTre
     VoxelPlane &plane = *current_octo->plane_ptr_;
     Eigen::Vector3d p_world_to_center = p_w - plane.center_;
     float dis_to_plane = fabs(plane.normal_(0) * p_w(0) + plane.normal_(1) * p_w(1) + plane.normal_(2) * p_w(2) + plane.d_);
+
+    // 点到平面中心距离
     float dis_to_center = (plane.center_(0) - p_w(0)) * (plane.center_(0) - p_w(0)) + (plane.center_(1) - p_w(1)) * (plane.center_(1) - p_w(1)) +
                           (plane.center_(2) - p_w(2)) * (plane.center_(2) - p_w(2));
     float range_dis = sqrt(dis_to_center - dis_to_plane * dis_to_plane);
@@ -873,11 +875,16 @@ void VoxelMapManager::build_single_residual(pointWithVar &pv, const VoxelOctoTre
       J_nq.block<1, 3>(0, 0) = p_w - plane.center_;
       J_nq.block<1, 3>(0, 3) = -plane.normal_;
       double sigma_l = J_nq * plane.plane_var_ * J_nq.transpose();
+      // 计算点不确定性
       sigma_l += plane.normal_.transpose() * pv.var * plane.normal_;
+
+      // 点到平面的距离小于阈值（由 sigma_num 控制），认为该点与平面匹配
       if (dis_to_plane < sigma_num * sqrt(sigma_l))
       {
         is_sucess = true;
         double this_prob = 1.0 / (sqrt(sigma_l)) * exp(-0.5 * dis_to_plane * dis_to_plane / sigma_l);
+
+        // 更新最优结果
         if (this_prob > prob)
         {
           prob = this_prob;
@@ -906,12 +913,13 @@ void VoxelMapManager::build_single_residual(pointWithVar &pv, const VoxelOctoTre
       return;
     }
   }
-  else
+  else // 如果当前节点不是一个有效平面，则尝试在其子节点中查找匹配的平面
   {
     if (current_layer < max_layer)
     {
       for (size_t leafnum = 0; leafnum < 8; leafnum++)
       {
+        // 遍历所有子节点
         if (current_octo->leaves_[leafnum] != nullptr)
         {
 
@@ -948,7 +956,7 @@ void VoxelMapManager::pubVoxelMap()
     uint8_t r, g, b;
     mapJet(trace, 0, 1, r, g, b);
     Eigen::Vector3d plane_rgb(r / 256.0, g / 256.0, b / 256.0);
-    double alpha;
+    double alpha; // 透明度
     if (pub_plane_list[i].is_plane_) { alpha = use_alpha; }
     else { alpha = 0; }
     pubSinglePlane(voxel_plane, "plane", pub_plane_list[i], alpha, plane_rgb);
@@ -988,6 +996,9 @@ void VoxelMapManager::pubSinglePlane(visualization_msgs::MarkerArray &plane_pub,
   plane.pose.position.y = single_plane.center_[1];
   plane.pose.position.z = single_plane.center_[2];
   geometry_msgs::Quaternion q;
+  // x_normal_ 平面主方向（最大特征值对应）
+  // y_normal_ 平面次方向（次特征值对应）
+  // normal_ 平面次方向（最小特征值对应）
   CalcVectQuation(single_plane.x_normal_, single_plane.y_normal_, single_plane.normal_, q);
   plane.pose.orientation = q;
   plane.scale.x = 3 * sqrt(single_plane.max_eigen_value_);
@@ -1004,6 +1015,7 @@ void VoxelMapManager::pubSinglePlane(visualization_msgs::MarkerArray &plane_pub,
 void VoxelMapManager::CalcVectQuation(const Eigen::Vector3d &x_vec, const Eigen::Vector3d &y_vec, const Eigen::Vector3d &z_vec,
                                       geometry_msgs::Quaternion &q)
 {
+  // 三个特征值构成局部坐标系，用于可视化
   Eigen::Matrix3d rot;
   rot << x_vec(0), x_vec(1), x_vec(2), y_vec(0), y_vec(1), y_vec(2), z_vec(0), z_vec(1), z_vec(2);
   Eigen::Matrix3d rotation = rot.transpose();
@@ -1063,6 +1075,8 @@ void VoxelMapManager::mapJet(double v, double vmin, double vmax, uint8_t &r, uin
 
 void VoxelMapManager::mapSliding()
 {
+  // 当系统移动一定距离后，清理超出范围的体素地图数据，以保持地图在机器人周围的有效性并提升性能
+
   if((position_last_ - last_slide_position).norm() < config_setting_.sliding_thresh)
   {
     std::cout<<RED<<"[DEBUG]: Last sliding length "<<(position_last_ - last_slide_position).norm()<<RESET<<"\n";
@@ -1070,15 +1084,16 @@ void VoxelMapManager::mapSliding()
   }
 
   //get global id now
-  last_slide_position = position_last_;
+  last_slide_position = position_last_; // position_last_ 当前state世界坐标
   double t_sliding_start = omp_get_wtime();
-  float loc_xyz[3];
+  float loc_xyz[3]; // 世界坐标转体素地图坐标
   for (int j = 0; j < 3; j++)
   {
     loc_xyz[j] = position_last_[j] / config_setting_.max_voxel_size_;
     if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
   }
   // VOXEL_LOCATION position((int64_t)loc_xyz[0], (int64_t)loc_xyz[1], (int64_t)loc_xyz[2]);//discrete global
+  // 清除超出范围的体素
   clearMemOutOfMap((int64_t)loc_xyz[0] + config_setting_.half_map_size, (int64_t)loc_xyz[0] - config_setting_.half_map_size,
                     (int64_t)loc_xyz[1] + config_setting_.half_map_size, (int64_t)loc_xyz[1] - config_setting_.half_map_size,
                     (int64_t)loc_xyz[2] + config_setting_.half_map_size, (int64_t)loc_xyz[2] - config_setting_.half_map_size);
@@ -1095,6 +1110,7 @@ void VoxelMapManager::clearMemOutOfMap(const int& x_max,const int& x_min,const i
   for (auto it = voxel_map_.begin(); it != voxel_map_.end(); )
   {
     const VOXEL_LOCATION& loc = it->first;
+    // 如果体素位置超出了滑动窗口边界，则标记为应删除
     bool should_remove = loc.x > x_max || loc.x < x_min || loc.y > y_max || loc.y < y_min || loc.z > z_max || loc.z < z_min;
     if (should_remove){
       // last_delete_time = omp_get_wtime();
