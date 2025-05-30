@@ -522,10 +522,14 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
       /*** calculate the Measuremnt Jacobian matrix H ***/
 
-      // A矩阵表示由旋转引起的变化,参考voxelmap式子1
+      // A矩阵表示每个点的Jacobian H 矩阵对状态量求偏导，残差是（点到平面距离：预测点-测量点）,具体H矩阵的计算过程参考
+      // https://github.com/hku-mars/FAST_LIO/issues/28
+      // https://zhuanlan.zhihu.com/p/587500859
+      // https://zhuanlan.zhihu.com/p/538975422
       V3D A(point_crossmat * state_.rot_end.transpose() * ptpl_list_[i].normal_);
       // 每一行 Hsub 包括两部分: 由旋转引起的 A 向量（前三列）,平面法向量（后三列）
-      // 注意，这里舍弃了第三项法向量
+
+      // Hsub 是观测方程对x_k的jacobian矩阵，可以参考 https://zhuanlan.zhihu.com/p/587500859 对Hsub矩阵的推导
       Hsub.row(i) << VEC_FROM_ARRAY(A), ptpl_list_[i].normal_[0], ptpl_list_[i].normal_[1], ptpl_list_[i].normal_[2];
 
       // IEFK公式 构造 H^T * R^{-1} 矩阵（观测雅可比矩阵转置乘以测量协方差逆矩阵），用于后续卡尔曼增益计算
