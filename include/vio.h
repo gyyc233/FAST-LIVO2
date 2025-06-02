@@ -70,7 +70,7 @@ public:
 class VOXEL_POINTS
 {
 public:
-  std::vector<VisualPoint *> voxel_points; // 属于该体素的视觉特征点
+  std::vector<VisualPoint *> voxel_points; // 属于该体素的所有视觉特征点
   int count; // 该体素内特征点数量
   VOXEL_POINTS(int num) : count(num) {}
   ~VOXEL_POINTS() 
@@ -133,7 +133,7 @@ public:
   MatrixXd K, H_sub_inv;
 
   ofstream fout_camera, fout_colmap;
-  unordered_map<VOXEL_LOCATION, VOXEL_POINTS *> feat_map;
+  unordered_map<VOXEL_LOCATION, VOXEL_POINTS *> feat_map; // 视觉点体素地图
   unordered_map<VOXEL_LOCATION, int> sub_feat_map; 
   unordered_map<int, Warp *> warp_map; // 帧之间仿射变换的映射表
   vector<VisualPoint *> retrieve_voxel_points;
@@ -200,6 +200,14 @@ public:
                            const int level_ref, 
                            const int pyramid_level, const int halfpatch_size, Matrix2d &A_cur_ref);
 
+  /// @brief 计算参考帧到当前帧之间的仿射变换矩阵，通过单应性投影实现
+  /// @param cam camera model
+  /// @param px_ref 参考帧中某个特征点的像素坐标
+  /// @param xyz_ref 特征点对应的3D空间坐标
+  /// @param normal_ref 特征点所在平面的法向量
+  /// @param T_cur_ref 当前帧到参考帧的变换（SE(3)）
+  /// @param level_ref 图像金字塔层级
+  /// @param A_cur_ref 输出的仿射变换矩阵
   void getWarpMatrixAffineHomography(const vk::AbstractCamera &cam, const V2D &px_ref,
                                      const V3D &xyz_ref, const V3D &normal_ref, const SE3 &T_cur_ref, const int level_ref, Matrix2d &A_cur_ref);
 

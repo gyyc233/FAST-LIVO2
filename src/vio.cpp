@@ -252,14 +252,17 @@ void VIOManager::getImagePatch(cv::Mat img, V2D pc, float *patch_tmp, int level)
 
 void VIOManager::insertPointIntoVoxelMap(VisualPoint *pt_new)
 {
-  V3D pt_w(pt_new->pos_[0], pt_new->pos_[1], pt_new->pos_[2]);
-  double voxel_size = 0.5;
-  float loc_xyz[3];
+  V3D pt_w(pt_new->pos_[0], pt_new->pos_[1], pt_new->pos_[2]); // 视觉点在世界坐标系下的坐标
+  double voxel_size = 0.5; // 每个体素（voxel）的大小为 0.5 单位长度
+  float loc_xyz[3]; // 对应体素坐标
   for (int j = 0; j < 3; j++)
   {
+    // 将点的世界坐标除以 voxel_size，得到它在该维度上的体素索引
     loc_xyz[j] = pt_w[j] / voxel_size;
     if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
   }
+
+  // 插入点到体素地图
   VOXEL_LOCATION position((int64_t)loc_xyz[0], (int64_t)loc_xyz[1], (int64_t)loc_xyz[2]);
   auto iter = feat_map.find(position);
   if (iter != feat_map.end())
@@ -269,6 +272,7 @@ void VIOManager::insertPointIntoVoxelMap(VisualPoint *pt_new)
   }
   else
   {
+    // 如果没有找到对应的体素，则新建一个体素，并将当前视觉点添加进去
     VOXEL_POINTS *ot = new VOXEL_POINTS(0);
     ot->voxel_points.push_back(pt_new);
     feat_map[position] = ot;
@@ -279,23 +283,36 @@ void VIOManager::getWarpMatrixAffineHomography(const vk::AbstractCamera &cam, co
                                                   const SE3 &T_cur_ref, const int level_ref, Matrix2d &A_cur_ref)
 {
   // create homography matrix
-  const V3D t = T_cur_ref.inverse().translation();
+  const V3D t = T_cur_ref.inverse().translation(); // 当前帧到参考帧的平移向量
+  // 构造单应矩阵（因为特征点都在平面上）
+  // TODO: 单应矩阵构造原理
   const Eigen::Matrix3d H_cur_ref =
       T_cur_ref.rotation_matrix() * (normal_ref.dot(xyz_ref) * Eigen::Matrix3d::Identity() - t * normal_ref.transpose());
   // Compute affine warp matrix A_ref_cur using homography projection
+  
+  // 在参考帧图像上以 px_ref 为中心，分别沿x和y方向移动一定距离（kHalfPatchSize * scale），获取两个新的像素点
+  // 将这两个像素点反投影到3D空间中，得到两个新的3D点 f_du_ref 和 f_dv_ref
   const int kHalfPatchSize = 4;
   V3D f_du_ref(cam.cam2world(px_ref + Eigen::Vector2d(kHalfPatchSize, 0) * (1 << level_ref)));
   V3D f_dv_ref(cam.cam2world(px_ref + Eigen::Vector2d(0, kHalfPatchSize) * (1 << level_ref)));
   //   f_du_ref = f_du_ref/f_du_ref[2];
   //   f_dv_ref = f_dv_ref/f_dv_ref[2];
+
+  // 利用之前构造的单应性矩阵 H_cur_ref，将参考帧中的3D点 xyz_ref、f_du_ref 和 f_dv_ref 映射到当前帧中，得到相应的3D坐标
   const V3D f_cur(H_cur_ref * xyz_ref);
   const V3D f_du_cur = H_cur_ref * f_du_ref;
   const V3D f_dv_cur = H_cur_ref * f_dv_ref;
+
+  // 将变换后的3D点投影回图像平面，得到它们在当前帧中的像素坐标
   V2D px_cur(cam.world2cam(f_cur));
   V2D px_du_cur(cam.world2cam(f_du_cur));
   V2D px_dv_cur(cam.world2cam(f_dv_cur));
+
+  // TODO: 将单应矩阵转为仿射变换矩阵
+  // 通过比较当前帧与参考帧中对应点的位置差异，计算出仿射变换矩阵 A_cur_ref 的两列值
   A_cur_ref.col(0) = (px_du_cur - px_cur) / kHalfPatchSize;
   A_cur_ref.col(1) = (px_dv_cur - px_cur) / kHalfPatchSize;
+  // 这个仿射变换矩阵可以用来对图像块进行仿射变换
 }
 
 void VIOManager::getWarpMatrixAffine(const vk::AbstractCamera &cam, const Vector2d &px_ref, const Vector3d &f_ref, const double depth_ref,
