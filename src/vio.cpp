@@ -28,12 +28,14 @@ VIOManager::~VIOManager()
 
 void VIOManager::setImuToLidarExtrinsic(const V3D &transl, const M3D &rot)
 {
+  // 这里旋转取了逆变换
   Pli = -rot.transpose() * transl;
   Rli = rot.transpose();
 }
 
 void VIOManager::setLidarToCameraExtrinsic(vector<double> &R, vector<double> &P)
 {
+  // 
   Rcl << MAT_FROM_ARRAY(R);
   Pcl << VEC_FROM_ARRAY(P);
 }
@@ -54,6 +56,8 @@ void VIOManager::initializeVIO()
   height = cam->height();
 
   printf("width: %d, height: %d, scale: %f\n", width, height, image_resize_factor);
+
+  // 估计camera到imu的外参
   Rci = Rcl * Rli;
   Pci = Rcl * Pli + Pcl;
 
@@ -62,8 +66,12 @@ void VIOManager::initializeVIO()
   Jdphi_dR = Rci;
   Pic = -Rci.transpose() * Pci;
   tmp << SKEW_SYM_MATRX(Pic);
+  // 向量对旋转Rci求偏导，右扰动更新
   Jdp_dR = -Rci * tmp;
 
+  // grid_size 由配置文件给定
+  // 图像划分为固定大小的网格（grid），grid_size 每个网格的像素尺寸
+  // grid_n_width, grid_n_height：图像在宽和高方向上被划分的网格数量；length：总的网格数
   if (grid_size > 10)
   {
     grid_n_width = ceil(static_cast<double>(width / grid_size));
@@ -77,13 +85,17 @@ void VIOManager::initializeVIO()
   }
   length = grid_n_width * grid_n_height;
 
+  // Raycasting on Demand 按需光线投射
+  // 为每个图像网格（grid）生成一组沿着深度方向的采样点
   if(raycast_en)
   {
     // cv::Mat img_test = cv::Mat::zeros(height, width, CV_8UC1);
     // uchar* it = (uchar*)img_test.data;
 
+    // 初始化边框标志数组，标记每个网格是否位于图像边缘
     border_flag.resize(length, 0);
 
+    // 初始化每个网格的3D点采样信息
     std::vector<std::vector<V3D>>().swap(rays_with_sample_points);
     rays_with_sample_points.reserve(length);
     printf("grid_size: %d, grid_n_height: %d, grid_n_width: %d, length: %d\n", grid_size, grid_n_height, grid_n_width, length);
@@ -95,16 +107,19 @@ void VIOManager::initializeVIO()
     {
       for (int grid_col = 1; grid_col <= grid_n_width; grid_col++)
       {
-        std::vector<V3D> SamplePointsEachGrid;
+        std::vector<V3D> SamplePointsEachGrid; // 采样的3D点
         int index = (grid_row - 1) * grid_n_width + grid_col - 1;
 
+        // 标记边界
         if (grid_row == 1 || grid_col == 1 || grid_row == grid_n_height || grid_col == grid_n_width) border_flag[index] = 1;
 
+        // 计算网格对应像素
         int u = grid_size / 2 + (grid_col - 1) * grid_size;
         int v = grid_size / 2 + (grid_row - 1) * grid_size;
         // it[ u + v * width ] = 255;
         for (float d_temp = d_min; d_temp <= d_max; d_temp += step)
         {
+          // 在d_min与d_max之间，每隔step深度采样，生成一个采样点
           V3D xyz;
           xyz = cam->cam2world(u, v);
           xyz *= d_temp / xyz[2];
@@ -147,6 +162,7 @@ void VIOManager::initializeVIO()
   update_flag.resize(length);
   scan_value.resize(length);
 
+  // patch_size 由文件给定，每一个patch包含patch_size_total个像素
   patch_size_total = patch_size * patch_size;
   patch_size_half = static_cast<int>(patch_size / 2);
   patch_buffer.resize(patch_size_total);
@@ -162,7 +178,7 @@ void VIOManager::initializeVIO()
 void VIOManager::resetGrid()
 {
   fill(grid_num.begin(), grid_num.end(), TYPE_UNKNOWN);
-  fill(map_index.begin(), map_index.end(), 0);
+  fill(map_index.begin(), map_index.end(), 0); // 每个网格对应的地图索引
   fill(map_dist.begin(), map_dist.end(), 10000.0f);
   fill(update_flag.begin(), update_flag.end(), 0);
   fill(scan_value.begin(), scan_value.end(), 0.0f);
@@ -192,6 +208,8 @@ void VIOManager::computeProjectionJacobian(V3D p, MD(2, 3) & J)
   const double y = p[1];
   const double z_inv = 1. / p[2];
   const double z_inv_2 = z_inv * z_inv;
+
+  // (预测-观测)
   J(0, 0) = fx * z_inv;
   J(0, 1) = 0.0;
   J(0, 2) = -fx * x * z_inv_2;
@@ -205,19 +223,27 @@ void VIOManager::getImagePatch(cv::Mat img, V2D pc, float *patch_tmp, int level)
   const float u_ref = pc[0];
   const float v_ref = pc[1];
   const int scale = (1 << level);
+
+  // 将图像块中心点 pc 的坐标转换为当前金字塔层级下的整数部分和小数部分 亚像素精度
+  // 通过计算周围四个像素点的权重，并进行加权求和来获得目标位置的像素值
   const int u_ref_i = floorf(pc[0] / scale) * scale;
   const int v_ref_i = floorf(pc[1] / scale) * scale;
-  const float subpix_u_ref = (u_ref - u_ref_i) / scale;
-  const float subpix_v_ref = (v_ref - v_ref_i) / scale;
-  const float w_ref_tl = (1.0 - subpix_u_ref) * (1.0 - subpix_v_ref);
-  const float w_ref_tr = subpix_u_ref * (1.0 - subpix_v_ref);
-  const float w_ref_bl = (1.0 - subpix_u_ref) * subpix_v_ref;
-  const float w_ref_br = subpix_u_ref * subpix_v_ref;
+  const float subpix_u_ref = (u_ref - u_ref_i) / scale; // 特征点在 x 方向上的亚像素偏移量
+  const float subpix_v_ref = (v_ref - v_ref_i) / scale; // 特征点在 y 方向上的亚像素偏移量
+
+  // 计算了双线性插值的四个权重
+  const float w_ref_tl = (1.0 - subpix_u_ref) * (1.0 - subpix_v_ref); // 左上角像素点的权重
+  const float w_ref_tr = subpix_u_ref * (1.0 - subpix_v_ref); // 右上角像素点的权重
+  const float w_ref_bl = (1.0 - subpix_u_ref) * subpix_v_ref; // 左下角像素点的权重
+  const float w_ref_br = subpix_u_ref * subpix_v_ref; // 右下角像素点的权重
+
   for (int x = 0; x < patch_size; x++)
   {
+    // 计算当前 patch 行在图像中的起始位置
     uint8_t *img_ptr = (uint8_t *)img.data + (v_ref_i - patch_size_half * scale + x * scale) * width + (u_ref_i - patch_size_half * scale);
     for (int y = 0; y < patch_size; y++, img_ptr += scale)
     {
+      // 双线性插值 使用四个邻近像素（左上、右上、左下、右下）及其对应的权重进行插值计算
       patch_tmp[patch_size_total * level + x * patch_size + y] =
           w_ref_tl * img_ptr[0] + w_ref_tr * img_ptr[scale] + w_ref_bl * img_ptr[scale * width] + w_ref_br * img_ptr[scale * width + scale];
     }
