@@ -737,12 +737,16 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       int search_level;
       Matrix2d A_cur_ref_zero;
 
+      // 为一个3D点 pt 选择最合适的参考图像特征（ref_ftr）
+
       if (!pt->is_normal_initialized_) continue;
 
+      // 如果启用了法向量信息，则通过比较不同视角下图像块的光度误差来选择最稳定的参考特征
       if (normal_en)
       {
         float phtometric_errors_min = std::numeric_limits<float>::max();
 
+        // 如果只有一条观测数据（pt->obs_.size() == 1），就直接把它作为参考特征
         if (pt->obs_.size() == 1)
         {
           ref_ftr = *pt->obs_.begin();
@@ -751,35 +755,45 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         }
         else if (!pt->has_ref_patch_)
         {
+          // 遍历所有观测数据
           for (auto it = pt->obs_.begin(), ite = pt->obs_.end(); it != ite; ++it)
           {
             Feature *ref_patch_temp = *it;
-            float *patch_temp = ref_patch_temp->patch_;
-            float phtometric_errors = 0.0;
+            float *patch_temp = ref_patch_temp->patch_; // 获取该观测视角的图像块，视角1
+            float phtometric_errors = 0.0; // 用于累加当前观测视角与其他视角之间的光度误差
             int count = 0;
+
+            // 两两观测视角对比
             for (auto itm = pt->obs_.begin(), itme = pt->obs_.end(); itm != itme; ++itm)
             {
+              // 自己和自己比则跳过
               if ((*itm)->id_ == ref_patch_temp->id_) continue;
-              float *patch_cache = (*itm)->patch_;
+              float *patch_cache = (*itm)->patch_; // 获取视角2图像块
 
               for (int ind = 0; ind < patch_size_total; ind++)
               {
+                // 计算两个不同视角下图像块之间的光度误差（photometric error），即每个像素差值的平方之和
                 phtometric_errors += (patch_temp[ind] - patch_cache[ind]) * (patch_temp[ind] - patch_cache[ind]);
               }
               count++;
             }
+            // 计算平均两个视角的平均光度误差
             phtometric_errors = phtometric_errors / count;
+            // 更新最小误差并将该视角作为最佳参考帧
             if (phtometric_errors < phtometric_errors_min)
             {
               phtometric_errors_min = phtometric_errors;
               ref_ftr = ref_patch_temp;
             }
           }
+
+          // 为pt选择平均光度误差最小的图像块作为最佳参考帧
           pt->ref_patch = ref_ftr;
           pt->has_ref_patch_ = true;
         }
         else { ref_ftr = pt->ref_patch; }
       }
+      // 如果没有启用法向量信息，则视角相似性（如角度差异和距离）来选择参考特征
       else
       {
         if (!pt->getCloseViewObs(new_frame_->pos(), ref_ftr, pc)) continue;
@@ -787,8 +801,8 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
       if (normal_en)
       {
+        // 将当前视觉点的法向量 pt->normal_ 和位置 pt->pos_ 从世界坐标系转换到参考帧（ref_ftr）的相机坐标系下
         V3D norm_vec = (ref_ftr->T_f_w_.rotation_matrix() * pt->normal_).normalized();
-        
         V3D pf(ref_ftr->T_f_w_ * pt->pos_);
         // V3D pf_norm = pf.normalized();
         
@@ -796,14 +810,17 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         // if(cos_theta < 0) norm_vec = -norm_vec;
         // if (abs(cos_theta) < 0.08) continue; // 0.5 60 degree 0.34 70 degree 0.17 80 degree 0.08 85 degree
 
+        // 计算从参考帧（ref_ftr）到当前帧（new_frame_）的变换矩阵 T_cur_ref
         SE3 T_cur_ref = new_frame_->T_f_w_ * ref_ftr->T_f_w_.inverse();
 
+        // 根据参考帧像素坐标 ref_ftr->px_、3D点坐标 pf、法向量 norm_vec 和帧间变换 T_cur_ref，计算仿射变换矩阵 A_cur_ref_zero
         getWarpMatrixAffineHomography(*cam, ref_ftr->px_, pf, norm_vec, T_cur_ref, 0, A_cur_ref_zero);
-
+        // 根据仿射变换矩阵的行列式值判断需要在图像金字塔中的哪个层级进行搜索
         search_level = getBestSearchLevel(A_cur_ref_zero, 2);
       }
       else
       {
+        // 若缓存中已有该参考帧对应的仿射变换信息（通过 warp_map 查找），则直接复用
         auto iter_warp = warp_map.find(ref_ftr->id_);
         if (iter_warp != warp_map.end())
         {
@@ -812,11 +829,13 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         }
         else
         {
+          // 如果没有缓存信息，用深度信息、相机模型和帧间变换，计算出一个局部的仿射变换矩阵
           getWarpMatrixAffine(*cam, ref_ftr->px_, ref_ftr->f_, (ref_ftr->pos() - pt->pos_).norm(), new_frame_->T_f_w_ * ref_ftr->T_f_w_.inverse(),
                               ref_ftr->level_, 0, patch_size_half, A_cur_ref_zero);
 
           search_level = getBestSearchLevel(A_cur_ref_zero, 2);
 
+          // 保存该放射变换与金字塔层级
           Warp *ot = new Warp(search_level, A_cur_ref_zero);
           warp_map[ref_ftr->id_] = ot;
         }
@@ -827,18 +846,27 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
       for (int pyramid_level = 0; pyramid_level <= patch_pyrimid_level - 1; pyramid_level++)
       {
+        // 遍历图像金字塔的不同层级（pyramid_level），对参考帧中的图像块进行变形操作
+        // 对图像块进行不同分辨率下的仿射变换
         warpAffine(A_cur_ref_zero, ref_ftr->img_, ref_ftr->px_, ref_ftr->level_, search_level, pyramid_level, patch_size_half, patch_wrap.data());
       }
 
+      // 从当前帧图像中提取以 pc 点为中心的图像块，并使用双线性插值方法进行亚像素级别的采样，结果保存在 patch_buffer 中
       getImagePatch(img, pc, patch_buffer.data(), 0);
 
       float error = 0.0;
+      // 遍历图像块中的每一个像素点
+      // 计算当前帧图像块（patch_buffer）与参考帧图像块（patch_wrap）之间的像素差值
       for (int ind = 0; ind < patch_size_total; ind++)
       {
+        // 曝光时间的倒数，即越亮的图像其值越小
+        // patch_wrap 是根据仿射变换矩阵从其他帧“扭曲”过来的图像块
+        // patch_buffer 则是当前帧中的原始图像块
         error += (ref_ftr->inv_expo_time_ * patch_wrap[ind] - state->inv_expo_time * patch_buffer[ind]) *
                  (ref_ftr->inv_expo_time_ * patch_wrap[ind] - state->inv_expo_time * patch_buffer[ind]);
       }
 
+      // 计算仿射变换后的图像块与当前帧图像块的归一化互相关
       if (ncc_en)
       {
         double ncc = calculateNCC(patch_wrap.data(), patch_buffer.data(), patch_size_total);
@@ -849,14 +877,15 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         }
       }
 
+      // 跳过误匹配的图像块
       if (error > outlier_threshold * patch_size_total) continue;
 
-      visual_submap->voxel_points.push_back(pt);
-      visual_submap->propa_errors.push_back(error);
-      visual_submap->search_levels.push_back(search_level);
+      visual_submap->voxel_points.push_back(pt); // 将当前特征点 pt 加入到 visual_submap 的体素点列表中，表示这个点被成功追踪并用于建图
+      visual_submap->propa_errors.push_back(error); // 存储当前点的传播误差（propagation error），用于评估追踪质量
+      visual_submap->search_levels.push_back(search_level); // 记录在金字塔图像中进行匹配所使用的层级（level），用于后续调整搜索策略
       visual_submap->errors.push_back(error);
-      visual_submap->warp_patch.push_back(patch_wrap);
-      visual_submap->inv_expo_list.push_back(ref_ftr->inv_expo_time_);
+      visual_submap->warp_patch.push_back(patch_wrap); // 存储经过仿射变换后对齐的图像块（warped patch），可用于下一帧的追踪或光流计算
+      visual_submap->inv_expo_list.push_back(ref_ftr->inv_expo_time_); // 存储参考帧的逆曝光时间（inverse exposure time），用于光度一致性补偿，避免不同光照条件下的误差放大
 
       // t_5 += omp_get_wtime() - t_1;
     }

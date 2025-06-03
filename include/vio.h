@@ -205,14 +205,14 @@ public:
 
   /// @brief 计算仿射矩阵，用于描述图像中某个特征点周围的小块（patch）在两个不同帧之间的形变，用于图像匹配
   /// @param cam 
-  /// @param px_ref 
-  /// @param f_ref 
-  /// @param depth_ref 
-  /// @param T_cur_ref 
-  /// @param level_ref 
+  /// @param px_ref 参考帧中特征点的像素坐标
+  /// @param f_ref 特征点的方向向量（单位向量），表示从相机原点指向该点的方向
+  /// @param depth_ref 该特征点在参考帧下的深度值
+  /// @param T_cur_ref 当前帧到参考帧的相对位姿变换
+  /// @param level_ref 图像金字塔中参考帧所在的层级
   /// @param pyramid_level 
-  /// @param halfpatch_size 
-  /// @param A_cur_ref 
+  /// @param halfpatch_size 图像块的一半大小
+  /// @param A_cur_ref 输出的仿射变换矩阵
   void getWarpMatrixAffine(const vk::AbstractCamera &cam, const Vector2d &px_ref, const Vector3d &f_ref, const double depth_ref, const SE3 &T_cur_ref,
                            const int level_ref, 
                            const int pyramid_level, const int halfpatch_size, Matrix2d &A_cur_ref);
@@ -232,10 +232,10 @@ public:
   /// @param A_cur_ref 从参考帧到当前帧的仿射变换矩阵
   /// @param img_ref 参考帧的图像
   /// @param px_ref 特征点在参考帧图像中的像素坐标
-  /// @param level_ref
-  /// @param search_level 搜索层级
-  /// @param pyramid_level 图像金字塔层级
-  /// @param halfpatch_size 
+  /// @param level_ref 参考帧使用的金字塔层级
+  /// @param search_level 根据图像块面积变化选择的搜索层级，用于控制在哪一层级进行匹配
+  /// @param pyramid_level 当前处理的金字塔层级
+  /// @param halfpatch_size 图像块的一半大小，用于定义图像块的范围
   /// @param patch 变形后的图像块
   void warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, const Vector2d &px_ref, const int level_ref, const int search_level,
                   const int pyramid_level, const int halfpatch_size, float *patch);
