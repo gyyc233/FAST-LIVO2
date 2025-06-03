@@ -110,7 +110,10 @@ public:
   bool ncc_en = false; // 归一化互相关（NCC）
   bool colmap_output_en = false; // 导出 COLMAP 数据
 
-  int width, height, grid_n_width, grid_n_height, length;
+  int width, height; // 图像尺寸
+  int grid_n_width; // 一帧图像中的网格宽度
+  int grid_n_height; // 一帧图像中的网格高度
+  int length; // 网格总数
   double image_resize_factor;
   double fx, fy, cx, cy;
   int patch_pyrimid_level, patch_size, patch_size_total, patch_size_half, border, warp_len;
@@ -133,12 +136,12 @@ public:
   MatrixXd K, H_sub_inv;
 
   ofstream fout_camera, fout_colmap;
-  unordered_map<VOXEL_LOCATION, VOXEL_POINTS *> feat_map; // 视觉点体素地图
+  unordered_map<VOXEL_LOCATION, VOXEL_POINTS *> feat_map; // 全局视觉点体素地图
   unordered_map<VOXEL_LOCATION, int> sub_feat_map; 
   unordered_map<int, Warp *> warp_map; // 帧之间仿射变换的映射表
-  vector<VisualPoint *> retrieve_voxel_points;
+  vector<VisualPoint *> retrieve_voxel_points; // 每个网格中最靠近相机的视觉特征点
   vector<pointWithVar> append_voxel_points;
-  FramePtr new_frame_;
+  FramePtr new_frame_; // 当前帧相机
   cv::Mat img_cp, img_rgb, img_test;
 
   enum CellType
@@ -159,6 +162,10 @@ public:
 
   void processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &feat_map, double img_time);
   
+  /// @brief 从稀疏视觉地图中检索当前帧可见的点
+  /// @param img 
+  /// @param pg 
+  /// @param plane_map 
   void retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
   
   /// @brief 生成视觉地图点
@@ -196,6 +203,16 @@ public:
 
   void updateVisualMapPoints(cv::Mat img);
 
+  /// @brief 计算仿射矩阵，用于描述图像中某个特征点周围的小块（patch）在两个不同帧之间的形变，用于图像匹配
+  /// @param cam 
+  /// @param px_ref 
+  /// @param f_ref 
+  /// @param depth_ref 
+  /// @param T_cur_ref 
+  /// @param level_ref 
+  /// @param pyramid_level 
+  /// @param halfpatch_size 
+  /// @param A_cur_ref 
   void getWarpMatrixAffine(const vk::AbstractCamera &cam, const Vector2d &px_ref, const Vector3d &f_ref, const double depth_ref, const SE3 &T_cur_ref,
                            const int level_ref, 
                            const int pyramid_level, const int halfpatch_size, Matrix2d &A_cur_ref);
@@ -211,6 +228,15 @@ public:
   void getWarpMatrixAffineHomography(const vk::AbstractCamera &cam, const V2D &px_ref,
                                      const V3D &xyz_ref, const V3D &normal_ref, const SE3 &T_cur_ref, const int level_ref, Matrix2d &A_cur_ref);
 
+  /// @brief 通过仿射变换，将参考帧中的图像块“扭曲”成当前帧的样子
+  /// @param A_cur_ref 从参考帧到当前帧的仿射变换矩阵
+  /// @param img_ref 参考帧的图像
+  /// @param px_ref 特征点在参考帧图像中的像素坐标
+  /// @param level_ref
+  /// @param search_level 搜索层级
+  /// @param pyramid_level 图像金字塔层级
+  /// @param halfpatch_size 
+  /// @param patch 变形后的图像块
   void warpAffine(const Matrix2d &A_cur_ref, const cv::Mat &img_ref, const Vector2d &px_ref, const int level_ref, const int search_level,
                   const int pyramid_level, const int halfpatch_size, float *patch);
 
@@ -230,9 +256,18 @@ public:
 
   //  导出 COLMAP 数据
   void dumpDataForColmap();
+
+  /// @brief NCC Normalized Cross-Correlation 归一化互相关，衡量两个图像块之间的相似性
+  /// @param ref_patch 参考图像快
+  /// @param cur_patch 当前图像块
+  /// @param patch_size 图像块中包含的像素数
+  /// @return 
   double calculateNCC(float *ref_patch, float *cur_patch, int patch_size);
 
-  //  获取最佳搜索图像金字塔层级
+  /// @brief 根据仿射变换矩阵的行列式值，决定在图像金字塔中应该使用哪一个层级来进行特征点匹配或图像块对齐
+  /// @param A_cur_ref 从参考帧到当前帧的仿射变换矩阵
+  /// @param max_level 图像金字塔的最大搜索层级
+  /// @return 
   int getBestSearchLevel(const Matrix2d &A_cur_ref, const int max_level);
 
   // 双线性插值获取像素值
