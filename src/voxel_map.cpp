@@ -522,12 +522,13 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
       /*** calculate the Measuremnt Jacobian matrix H ***/
 
-      // A矩阵表示每个点的Jacobian H 矩阵对状态量求偏导，残差是（点到平面距离：预测点-测量点）,具体H矩阵的计算过程参考
+      // A矩阵表示每个点的Jacobian H 矩阵,具体H矩阵的计算过程参考
       // https://github.com/hku-mars/FAST_LIO/issues/28
       // https://zhuanlan.zhihu.com/p/587500859
       // https://zhuanlan.zhihu.com/p/538975422
       V3D A(point_crossmat * state_.rot_end.transpose() * ptpl_list_[i].normal_);
       // 每一行 Hsub 包括两部分: 由旋转引起的 A 向量（前三列）,平面法向量（后三列）
+      // 注意，这里舍弃了第三项法向量
 
       // Hsub 是观测方程对x_k的jacobian矩阵，可以参考 https://zhuanlan.zhihu.com/p/587500859 对Hsub矩阵的推导
       Hsub.row(i) << VEC_FROM_ARRAY(A), ptpl_list_[i].normal_[0], ptpl_list_[i].normal_[1], ptpl_list_[i].normal_[2];
@@ -537,6 +538,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
           ptpl_list_[i].normal_[1] * R_inv(i), ptpl_list_[i].normal_[2] * R_inv(i);
 
       // 存储当前点到平面的距离作为测量残差
+      // 此处残差z添加上负号
       meas_vec(i) = -ptpl_list_[i].dis_to_plane_;
     }
 
@@ -546,30 +548,29 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     // IEKF K的计算，用的高位观测等效处理方法
     MatrixXd K(DIM_STATE, effct_feat_num_);
     // auto &&Hsub_T = Hsub.transpose();
-    // $ H^T R^{-1} r(点到平面残差) $
+    // HTz为 H^T * R^-1 * -z
     auto &&HTz = Hsub_T_R_inv * meas_vec;
     // fout_dbg<<"HTz: "<<HTz<<endl;
     
-    // 构建信息矩阵的一部分：$ H^T R^{-1} H $
+    // H_T_H为H^T * R^-1 * H
     // 这是卡尔曼增益计算中的关键部分，代表观测对状态估计的影响
     H_T_H.block<6, 6>(0, 0) = Hsub_T_R_inv * Hsub;
     // EigenSolver<Matrix<double, 6, 6>> es(H_T_H.block<6,6>(0,0));
 
-    // H_T_H.block<DIM_STATE, DIM_STATE>(0, 0) 是观测的信息矩阵
-    // state_.cov.block<DIM_STATE, DIM_STATE>(0, 0).inverse() 是预测状态协方差的逆
-    // IEFK kalman gain 整体公式 K = (H^T R^{-1} H + P^{-1})^{-1}
+    // K1为(H^T * R^-1 * H + P)^-1
     MD(DIM_STATE, DIM_STATE) &&K_1 = (H_T_H.block<DIM_STATE, DIM_STATE>(0, 0) + state_.cov.block<DIM_STATE, DIM_STATE>(0, 0).inverse()).inverse();
 
     // 构建中间矩阵 G，用于后续的状态更新
-    // 这一步实际上是：G = K * (H^T R^{-1} H)
-    // TODO: 这里为什么是乘 H_T_H.block<DIM_STATE, DIM_STATE>(0, 0)而不是乘Hsub_T_R_inv，发现在计算solution的时候乘HTz回去了
+    // 这一步实际上是：G = K * (H^T R^{-1} H) // G为K * H
     G.block<DIM_STATE, 6>(0, 0) = K_1.block<DIM_STATE, 6>(0, 0) * H_T_H.block<6, 6>(0, 0);
 
-    // vec 是预测状态与当前状态之间的差异
+    // vec 为 (x_predict ⊟ x_k)
     auto vec = state_propagat - state_;
 
     // solution 状态变量最大后验估计 \delta x_k
     // https://github.com/hku-mars/FAST-LIVO2/issues/301
+    // dx = -K * z - (x_k ⊟ x_predict) + K * H * (x_k ⊟ x_predict) 这是公式顺序
+    // dx = -K * z + (x_predict ⊟ x_k) - K * H * (x_predict ⊟ x_k)
     VD(DIM_STATE)
     solution = K_1.block<DIM_STATE, 6>(0, 0) * HTz + vec.block<DIM_STATE, 1>(0, 0) - G.block<DIM_STATE, 6>(0, 0) * vec.block<6, 1>(0, 0);
     // K_1.block<DIM_STATE, 6>(0, 0) * HTz 是基于观测的修正项
@@ -577,7 +578,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     // G * vec 是预测误差的加权修正
 
     int minRow, minCol;
-    // 将计算出的 solution \delta x_k 加到当前状态上，完成本次迭代状态更新
+    // x_(k+1) = x_k ⊞ dx
     state_ += solution;
 
     // 提取旋转和平移增量
@@ -600,6 +601,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     {
       /*** Covariance Update ***/
       // _state.cov = (I_STATE - G) * _state.cov; TODO: 这里可以看看到G变量的定义
+      // P_k+1 = (I - KH)P_k
       state_.cov.block<DIM_STATE, DIM_STATE>(0, 0) =
           (I_STATE.block<DIM_STATE, DIM_STATE>(0, 0) - G.block<DIM_STATE, DIM_STATE>(0, 0)) * state_.cov.block<DIM_STATE, DIM_STATE>(0, 0);
       // total_distance += (_state.pos_end - position_last).norm();
