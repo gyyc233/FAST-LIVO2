@@ -38,12 +38,12 @@ public:
   bool is_converged_;           //!< True if the point is converged. 是否收敛
   bool is_normal_initialized_;  //!< True if the normal is initialized. 法向量是否初始化
   bool has_ref_patch_;          //!< True if the point has a reference patch. 该点是否拥有参考patch
-  Feature *ref_patch;           //!< Reference patch of the point. 该点的参考patch
+  Feature *ref_patch;           //!< Reference patch of the point. 该视觉特征点的参考观测帧
 
   VisualPoint(const Vector3d &pos);
   ~VisualPoint();
 
-  /// @brief 从当前地图点的所有视觉观测特征中，找到评分最低的那个特征（分数越低表示特征越清晰，质量越好）
+  /// @brief 从当前地图点的所有视觉观测特征中，找到评分最低的那个特征（分数越低表示质量越差）
   /// @param framepos 
   /// @param ftr 指向当前地图点中评分最低的 feature
   void findMinScoreFeature(const Vector3d &framepos, Feature *&ftr) const;
@@ -53,6 +53,8 @@ public:
 
   void deleteFeatureRef(Feature *ftr);
 
+  /// @brief 将观测帧 ftr 加入该特征点的观测历史
+  /// @param ftr 
   void addFrameRef(Feature *ftr);
 
   /// @brief 从当前地图点的所有观测特征中，找到一个“视角最接近”的 Feature（即与当前帧视角相似的参考特征）

@@ -31,7 +31,7 @@ struct SubSparseMap
   vector<int> search_levels;
   vector<VisualPoint *> voxel_points; //稀疏地图中的视觉特征点
   vector<double> inv_expo_list; // 图像帧曝光的逆
-  vector<pointWithVar> add_from_voxel_map; // 从 voxel map 中添加的带有协方差信息的点
+  vector<pointWithVar> add_from_voxel_map; // 临时缓存的候选点列表，通常是通过 Raycasting 或其他方式从平面地图中提取的潜在特征点
 
   SubSparseMap()
   {
@@ -121,7 +121,7 @@ public:
 
   double img_point_cov, outlier_threshold, ncc_thre;
   
-  SubSparseMap *visual_submap;
+  SubSparseMap *visual_submap; // 视觉子地图，使用体素与光线投射提取的视觉地图点
   std::vector<std::vector<V3D>> rays_with_sample_points; // 每个网格的采样点信息
 
   double compute_jacobian_time, update_ekf_time;
@@ -146,8 +146,8 @@ public:
 
   enum CellType
   {
-    TYPE_MAP = 1,
-    TYPE_POINTCLOUD,
+    TYPE_MAP = 1, // 表示该网格已经被视觉地图中的点占据，不再考虑添加新的候选点
+    TYPE_POINTCLOUD, // 潜在的高质量角点
     TYPE_UNKNOWN
   };
 
@@ -169,8 +169,8 @@ public:
   void retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
   
   /// @brief 生成视觉地图点
-  /// @param img 
-  /// @param pg 
+  /// @param img 图像帧数据
+  /// @param pg lidar data with covariance
   void generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg);
 
   /// @brief 设置imu到LiDAR的外参
@@ -248,8 +248,12 @@ public:
 
   void updateFrameState(StatesGroup state);
 
+  /// @brief 可视化当前帧与参考帧之间的图像块匹配结果（如光度误差、法向量投影等）
+  /// @param plane_map 
   void projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
 
+  /// @brief 为每个视觉特征点更新其参考帧
+  /// @param plane_map 
   void updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
 
   void precomputeReferencePatches(int level);

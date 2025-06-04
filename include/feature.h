@@ -15,8 +15,8 @@ which is included as part of this source code package.
 
 #include "visual_point.h"
 
-// A salient image region that is tracked across frames.
-// 跨帧跟踪的显著图像区域
+// A salient image region that is tracked across frames. 跨帧跟踪的显著图像区域
+// 一个视觉点在某帧中的观测信息（图像块、位置、变换等）
 struct Feature
 {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
