@@ -30,7 +30,7 @@ struct Feature
   int id_; // 特征点ID
   FeatureType type_;     //!< Type can be corner or edgelet.
   cv::Mat img_;          //!< Image associated with the patch feature 图像数据
-  Eigen::Vector2d px_;          //!< Coordinates in pixels on pyramid level 0. 在图像金字塔第 0 层的像素坐标
+  Eigen::Vector2d px_;          //!< Coordinates in pixels on pyramid level 0. 视觉特征点在图像金字塔第 0 层的像素坐标
   Eigen::Vector3d f_;           //!< Unit-bearing vector of the patch feature. 图像patch的单位方位向量
   int level_;            //!< Image pyramid level where patch feature was extracted. 提取patch特征的图像金字塔级别
   VisualPoint *point_;   //!< Pointer to 3D point which corresponds to the patch feature. 3D 点对应的patch特征（视觉地图点）

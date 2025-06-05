@@ -157,7 +157,7 @@ public:
   double outlier_threshold;
   double plot_time;
   int frame_cnt;
-  double img_time_offset = 0.0;　 // 自定义图像时间偏移
+  double img_time_offset = 0.0; // 自定义图像时间偏移
   deque<PointCloudXYZI::Ptr> lid_raw_data_buffer; // 原始LiDAR数据
   deque<double> lid_header_time_buffer;
   deque<sensor_msgs::Imu::ConstPtr> imu_buffer; // imu 缓存

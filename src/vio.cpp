@@ -202,6 +202,7 @@ void VIOManager::resetGrid()
   // sample_points.clear();
 // }
 
+// 计算残差对预测投影点的偏导数，p是相机坐标系坐标（slam 14讲 p186）
 void VIOManager::computeProjectionJacobian(V3D p, MD(2, 3) & J)
 {
   const double x = p[0];
@@ -908,6 +909,8 @@ void VIOManager::computeJacobianAndUpdateEKF(cv::Mat img)
   for (int level = patch_pyrimid_level - 1; level >= 0; level--)
   {
     // 若启用逆向合成则禁用参考补丁缓存
+    // TODO: 这里和LIVO1 不同
+    // TODO: difference of updateStateInverse with updateState
     if (inverse_composition_en)
     {
       has_ref_patch_cache = false;
@@ -1276,14 +1279,14 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
 
   cv::Mat img_photometric_error = new_frame_->img_.clone(); // 用于光度误差计算
 
-  uchar *it = (uchar *)result.data;
-  uchar *it_normal = (uchar *)result_normal.data;
+  uchar *it = (uchar *)result.data; // 视觉点从参考观测帧仿射变换到当前观测帧的结果
+  uchar *it_normal = (uchar *)result_normal.data; // 视觉点从参考观测帧仿射变换到当前观测帧，再反变换回参考观测帧的结果
   uchar *it_dense = (uchar *)result_dense.data;
 
   struct pixel_member
   {
-    Vector2f pixel_pos;
-    uint8_t pixel_value;
+    Vector2f pixel_pos; // image patch 某个像素的坐标
+    uint8_t pixel_value; // image patch 某个像素的值
   };
 
   int num = 0;
@@ -1294,8 +1297,8 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
 
     if (pt->is_normal_initialized_)
     {
-      Feature *ref_ftr;
-      ref_ftr = pt->ref_patch; // 获取该视觉点对应的参考观测帧信息
+      Feature *ref_ftr; // 获取该视觉点对应的参考观测帧信息
+      ref_ftr = pt->ref_patch;
       // Feature* ref_ftr;
       V2D pc(new_frame_->w2c(pt->pos_)); // 当前帧下该视觉点的像素
       V2D pc_prior(new_frame_->w2c_prior(pt->pos_)); // 使用先验状态估计的像素坐标
@@ -1374,6 +1377,7 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
 
       std::vector<std::vector<pixel_member>> pixel_warp_matrix;
 
+      // 遍历图像块中的像素点
       for (int y = 0; y < patch_size; ++y)
       {
         vector<pixel_member> pixel_warp_vec;
@@ -1382,15 +1386,17 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
           Vector2f px_patch(x - patch_size / 2, y - patch_size / 2);
           px_patch *= (1 << search_level);
           const Vector2f px_ref(px_patch + ref_ftr->px_.cast<float>());
+          // 在参考帧 vk::interpolateMat_8u 双线性插值获取亚像素值（这里使像素值，不是像素坐标）
           uint8_t pixel_value = (uint8_t)vk::interpolateMat_8u(img_ref, px_ref[0], px_ref[1]);
 
+          // 将px_patch通过仿射变换到当前帧，查找对应像素
           const Vector2f px(A_cur_ref.cast<float>() * px_patch + pc.cast<float>());
           if (px[0] < 0 || px[1] < 0 || px[0] >= img_cur.cols - 1 || px[1] >= img_cur.rows - 1)
             continue;
           else
           {
             pixel_member pixel_warp;
-            pixel_warp.pixel_pos << px[0], px[1];
+            pixel_warp.pixel_pos << px[0], px[1]; // 该像素点在当前帧下的位置 px
             pixel_warp.pixel_value = pixel_value;
             pixel_warp_vec.push_back(pixel_warp);
           }
@@ -1398,6 +1404,7 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
         pixel_warp_matrix.push_back(pixel_warp_vec);
       }
 
+      // 从仿射变换后的像素点矩阵中提取整数边界
       float x_min = 1000;
       float y_min = 1000;
       float x_max = 0;
@@ -1420,7 +1427,9 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
       int y_min_i = floor(y_min);
       int x_max_i = ceil(x_max);
       int y_max_i = ceil(y_max);
-      Matrix2f A_cur_ref_Inv = A_cur_ref.inverse().cast<float>();
+
+      // 将仿射变换后的像素反投影到参考观测帧中
+      Matrix2f A_cur_ref_Inv = A_cur_ref.inverse().cast<float>(); // 视觉点当前观测帧到视觉点参考观测帧
       for (int i = x_min_i; i < x_max_i; i++)
       {
         for (int j = y_min_i; j < y_max_i; j++)
@@ -1438,14 +1447,16 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
       }
     }
   }
+
+  // 遍历子地图中的视觉点
   for (int i = 0; i < visual_submap->voxel_points.size(); i++)
   {
     VisualPoint *pt = visual_submap->voxel_points[i];
 
     if (!pt->is_normal_initialized_) continue;
 
-    Feature *ref_ftr;
-    V2D pc(new_frame_->w2c(pt->pos_));
+    Feature *ref_ftr; // 视觉点pt的参考观测帧
+    V2D pc(new_frame_->w2c(pt->pos_)); // 视觉点pt在当前帧下的像素坐标
     ref_ftr = pt->ref_patch;
 
     Matrix2d A_cur_ref;
@@ -1457,6 +1468,7 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
 
     cv::Mat img_cur = new_frame_->img_;
     cv::Mat img_ref = ref_ftr->img_;
+    // 像素点从参考观测帧仿射变换到当前观测帧
     for (int y = 0; y < patch_size; ++y)
     {
       for (int x = 0; x < patch_size; ++x) //, ++patch_ptr)
@@ -1478,6 +1490,7 @@ void VIOManager::projectPatchFromRefToCur(const unordered_map<VOXEL_LOCATION, Vo
       }
     }
   }
+
   cv::Mat ref_cur_combine;
   cv::Mat ref_cur_combine_normal;
   cv::Mat ref_cur_combine_error;
@@ -1502,12 +1515,17 @@ void VIOManager::precomputeReferencePatches(int level)
 {
   double t1 = omp_get_wtime();
   if (total_points == 0) return;
-  MD(1, 2) Jimg;
-  MD(2, 3) Jdpi;
-  MD(1, 3) Jdphi, Jdp, JdR, Jdt;
+  MD(1, 2) Jimg; // 图像梯度
+  MD(2, 3) Jdpi; // 视觉特征点的像素对相机归一化平面坐标偏导
+  MD(1, 3) Jdphi, Jdp;
+  MD(1, 3) JdR; // 图像重投影误差jacobian的旋转部分
+  MD(1, 3) Jdt; // 图像重投影误差jacobian的平移部分
 
+  // patch_size_total 每个 image patch 包含的像素数
+  // total_points 特征点数量
   const int H_DIM = total_points * patch_size_total;
 
+  // 每个像素点对状态向量的偏导
   H_sub_inv.resize(H_DIM, 6);
   H_sub_inv.setZero();
   M3D p_w_hat;
@@ -1516,33 +1534,37 @@ void VIOManager::precomputeReferencePatches(int level)
   {
     const int scale = (1 << level);
 
-    VisualPoint *pt = visual_submap->voxel_points[i];
-    cv::Mat img = pt->ref_patch->img_;
+    VisualPoint *pt = visual_submap->voxel_points[i]; // 当前视觉特征点
+    cv::Mat img = pt->ref_patch->img_; // 当前视觉特征点的参考观测帧
 
     if (pt == nullptr) continue;
 
-    double depth((pt->pos_ - pt->ref_patch->pos()).norm());
-    V3D pf = pt->ref_patch->f_ * depth;
-    V2D pc = pt->ref_patch->px_;
-    M3D R_ref_w = pt->ref_patch->T_f_w_.rotation_matrix();
+    double depth((pt->pos_ - pt->ref_patch->pos()).norm()); // 视觉点与其参考帧观测点之间的距离
+    V3D pf = pt->ref_patch->f_ * depth; // 视觉点在参考观测帧下的方向向量
+    V2D pc = pt->ref_patch->px_; // 视觉点在参考观测帧下的像素
+    M3D R_ref_w = pt->ref_patch->T_f_w_.rotation_matrix(); // 参考观测帧的旋转矩阵
 
+    // 重投影残差对预测的视觉特征点相机坐标求偏导
     computeProjectionJacobian(pf, Jdpi);
     p_w_hat << SKEW_SYM_MATRX(pt->pos_);
 
+    // 基于双线性插值的亚像素计算
     const float u_ref = pc[0];
     const float v_ref = pc[1];
     const int u_ref_i = floorf(pc[0] / scale) * scale;
     const int v_ref_i = floorf(pc[1] / scale) * scale;
     const float subpix_u_ref = (u_ref - u_ref_i) / scale;
     const float subpix_v_ref = (v_ref - v_ref_i) / scale;
-    const float w_ref_tl = (1.0 - subpix_u_ref) * (1.0 - subpix_v_ref);
-    const float w_ref_tr = subpix_u_ref * (1.0 - subpix_v_ref);
-    const float w_ref_bl = (1.0 - subpix_u_ref) * subpix_v_ref;
-    const float w_ref_br = subpix_u_ref * subpix_v_ref;
+    const float w_ref_tl = (1.0 - subpix_u_ref) * (1.0 - subpix_v_ref); // 左上角权重
+    const float w_ref_tr = subpix_u_ref * (1.0 - subpix_v_ref); // 右上角权重
+    const float w_ref_bl = (1.0 - subpix_u_ref) * subpix_v_ref; // 左下角权重
+    const float w_ref_br = subpix_u_ref * subpix_v_ref; // 右下角权重
 
+    // 遍历图像块中的每个像素
     for (int x = 0; x < patch_size; x++)
     {
       uint8_t *img_ptr = (uint8_t *)img.data + (v_ref_i + x * scale - patch_size_half * scale) * width + u_ref_i - patch_size_half * scale;
+      // 计算每个像素的梯度 du dv
       for (int y = 0; y < patch_size; ++y, img_ptr += scale)
       {
         float du =
@@ -1556,12 +1578,16 @@ void VIOManager::precomputeReferencePatches(int level)
               w_ref_br * img_ptr[width * scale * 2 + scale]) -
              (w_ref_tl * img_ptr[-scale * width] + w_ref_tr * img_ptr[-scale * width + scale] + w_ref_bl * img_ptr[0] + w_ref_br * img_ptr[scale]));
 
+        // 归一化像素梯度，适应金字塔层级
         Jimg << du, dv;
         Jimg = Jimg * (1.0 / scale);
 
+        // 重投影误差模型的雅克比矩阵
+        // 右扰动模型
         JdR = Jimg * Jdpi * R_ref_w * p_w_hat;
         Jdt = -Jimg * Jdpi * R_ref_w;
 
+        // 存储每个像素对应的 Jacobian
         H_sub_inv.block<1, 6>(i * patch_size_total + x * patch_size + y, 0) << JdR, Jdt;
       }
     }
@@ -1577,8 +1603,8 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
   MD(1, 2) Jimg;
   MD(2, 3) Jdpi;
   MD(1, 3) Jdphi, Jdp, JdR, Jdt;
-  VectorXd z;
-  MatrixXd H_sub;
+  VectorXd z; // 保存残差
+  MatrixXd H_sub; // 重投影jacobian映射到当前imu状态空间
   bool EKF_end = false;
   float last_error = std::numeric_limits<float>::max();
   compute_jacobian_time = update_ekf_time = 0.0;
@@ -1592,21 +1618,22 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
   H_sub.resize(H_DIM, 6);
   H_sub.setZero();
 
+  // 进IEKF迭代更新状态量
   for (int iteration = 0; iteration < max_iterations; iteration++)
   {
     double t1 = omp_get_wtime();
     double count_outlier = 0;
-    if (has_ref_patch_cache == false) precomputeReferencePatches(level);
+    if (has_ref_patch_cache == false) precomputeReferencePatches(level); // has_ref_patch_cache 在precomputeReferencePatches()内置为true
     int n_meas = 0;
     float error = 0.0;
-    M3D Rwi(state->rot_end);
-    V3D Pwi(state->pos_end);
+    M3D Rwi(state->rot_end); // 当前帧imu的状态估计旋转
+    V3D Pwi(state->pos_end); // 当前帧imu的状态估计平移
     P_wi_hat << SKEW_SYM_MATRX(Pwi);
-    Rcw = Rci * Rwi.transpose();
-    Pcw = -Rci * Rwi.transpose() * Pwi + Pci;
-
+    Rcw = Rci * Rwi.transpose(); // 当前帧相机到世界坐标系的旋转
+    Pcw = -Rci * Rwi.transpose() * Pwi + Pci; // 当前帧相机到世界坐标系的平移
     M3D p_hat;
 
+    // 对所有视觉点，在卡尔曼滤波中构建观测残差和对应的雅可比矩阵（Jacobian）
     for (int i = 0; i < total_points; i++)
     {
       float patch_error = 0.0;
@@ -1617,7 +1644,7 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
 
       if (pt == nullptr) continue;
 
-      V3D pf = Rcw * pt->pos_ + Pcw;
+      V3D pf = Rcw * pt->pos_ + Pcw; // 视觉特征点从世界坐标转到当前帧相机坐标系下
       pc = cam->world2cam(pf);
 
       const float u_ref = pc[0];
@@ -1631,47 +1658,56 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
       const float w_ref_bl = (1.0 - subpix_u_ref) * subpix_v_ref;
       const float w_ref_br = subpix_u_ref * subpix_v_ref;
 
-      vector<float> P = visual_submap->warp_patch[i];
+      vector<float> P = visual_submap->warp_patch[i]; // warp_patch[i]: 之前通过仿射变换对齐的图像块数据
       for (int x = 0; x < patch_size; x++)
       {
         uint8_t *img_ptr = (uint8_t *)img.data + (v_ref_i + x * scale - patch_size_half * scale) * width + u_ref_i - patch_size_half * scale;
         for (int y = 0; y < patch_size; ++y, img_ptr += scale)
         {
+          // 实际像素值-仿射变换预测像素值，作为残差
           double res = w_ref_tl * img_ptr[0] + w_ref_tr * img_ptr[scale] + w_ref_bl * img_ptr[scale * width] +
                        w_ref_br * img_ptr[scale * width + scale] - P[patch_size_total * level + x * patch_size + y];
           z(i * patch_size_total + x * patch_size + y) = res;
           patch_error += res * res;
           MD(1, 3) J_dR = H_sub_inv.block<1, 3>(i * patch_size_total + x * patch_size + y, 0);
           MD(1, 3) J_dt = H_sub_inv.block<1, 3>(i * patch_size_total + x * patch_size + y, 3);
+
+          // 将残差从图像梯度映射到当前imu状态空间
           JdR = J_dR * Rwi + J_dt * P_wi_hat * Rwi;
           Jdt = J_dt * Rwi;
           H_sub.block<1, 6>(i * patch_size_total + x * patch_size + y, 0) << JdR, Jdt;
           n_meas++;
         }
       }
-      visual_submap->errors[i] = patch_error;
+      visual_submap->errors[i] = patch_error; // 记录图像块残差平方
       error += patch_error;
     }
 
-    error = error / n_meas;
+    error = error / n_meas; // 所有特征点误差总和，用于迭代收敛判断
 
     compute_jacobian_time += omp_get_wtime() - t1;
 
     double t3 = omp_get_wtime();
 
+    // 如果当前误差小于或等于上次误差，则继续更新
     if (error <= last_error)
     {
       old_state = (*state);
       last_error = error;
 
+      // 以下是IEKF更新公式，具体可见 voxel_map.cpp StateEstimation()
       auto &&H_sub_T = H_sub.transpose();
       H_T_H.setZero();
       G.setZero();
       H_T_H.block<6, 6>(0, 0) = H_sub_T * H_sub;
+      // 结合
       MD(DIM_STATE, DIM_STATE) &&K_1 = (H_T_H + (state->cov / img_point_cov).inverse()).inverse();
       auto &&HTz = H_sub_T * z;
+      // vec 为 (x_predict ⊟ x_k) 先验预测值-IEKF第k次迭代值
       auto vec = (*state_propagat) - (*state);
       G.block<DIM_STATE, 6>(0, 0) = K_1.block<DIM_STATE, 6>(0, 0) * H_T_H.block<6, 6>(0, 0);
+      
+      // 状态增量
       auto solution = -K_1.block<DIM_STATE, 6>(0, 0) * HTz + vec - G.block<DIM_STATE, 6>(0, 0) * vec.block<6, 1>(0, 0);
       (*state) += solution;
       auto &&rot_add = solution.block<3, 1>(0, 0);
@@ -1681,6 +1717,7 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
     }
     else
     {
+      // 否则回滚状态
       (*state) = old_state;
       EKF_end = true;
     }
@@ -1711,11 +1748,11 @@ void VIOManager::updateState(cv::Mat img, int level)
   {
     double t1 = omp_get_wtime();
 
-    M3D Rwi(state->rot_end);
-    V3D Pwi(state->pos_end);
-    Rcw = Rci * Rwi.transpose();
-    Pcw = -Rci * Rwi.transpose() * Pwi + Pci;
-    Jdp_dt = Rci * Rwi.transpose();
+    M3D Rwi(state->rot_end); // 当前帧imu的状态估计旋转
+    V3D Pwi(state->pos_end); // 当前帧imu的状态估计平移
+    Rcw = Rci * Rwi.transpose(); // 当前帧相机到世界坐标系的旋转
+    Pcw = -Rci * Rwi.transpose() * Pwi + Pci; // 当前帧相机到世界坐标系的平移
+    Jdp_dt = Rci * Rwi.transpose(); // Pcw 对 Pwi 求偏导，将 IMU 平移误差映射到相机坐标空间
     
     float error = 0.0;
     int n_meas = 0;
@@ -1725,25 +1762,27 @@ void VIOManager::updateState(cv::Mat img, int level)
   
     #ifdef MP_EN
       omp_set_num_threads(MP_PROC_NUM);
-      #pragma omp parallel for reduction(+:error, n_meas)
+      #pragma omp parallel for reduction(+:error, n_meas) # reduction 在每个线程里面对变量 data 进行拷贝，然后在线程当中使用这个拷贝的变量，避免数据竞争
     #endif
     for (int i = 0; i < total_points; i++)
     {
+      // 为每个候选点计算 jacobian 
       // printf("thread is %d, i=%d, i address is %p\n", omp_get_thread_num(), i, &i);
       MD(1, 2) Jimg;
       MD(2, 3) Jdpi;
       MD(1, 3) Jdphi, Jdp, JdR, Jdt;
 
-      float patch_error = 0.0;
-      int search_level = visual_submap->search_levels[i];
-      int pyramid_level = level + search_level;
-      int scale = (1 << pyramid_level);
-      float inv_scale = 1.0f / scale;
+      float patch_error = 0.0; // 当前图像块所有像素光度误差平方和
+      int search_level = visual_submap->search_levels[i]; // 表示第 i 个特征点在图像金字塔中选择的搜索层级
+      int pyramid_level = level + search_level; // level 当前函数调用的图像金字塔层级（如从粗到精），pyramid_level: 最终要提取图像块的金字塔层级
+      int scale = (1 << pyramid_level); // 图像缩放比例
+      float inv_scale = 1.0f / scale; // 用于归一化图像梯度（gradient normalization），避免不同层级下梯度大小不一致导致 Jacobian 失真
 
       VisualPoint *pt = visual_submap->voxel_points[i];
 
       if (pt == nullptr) continue;
 
+      // 视觉点转到相机坐标系
       V3D pf = Rcw * pt->pos_ + Pcw;
       V2D pc = cam->world2cam(pf);
 
@@ -1762,7 +1801,9 @@ void VIOManager::updateState(cv::Mat img, int level)
       float w_ref_bl = (1.0 - subpix_u_ref) * subpix_v_ref;
       float w_ref_br = subpix_u_ref * subpix_v_ref;
 
+      // warp_patch[i]: 之前通过仿射变换对齐的图像块数据
       vector<float> P = visual_submap->warp_patch[i];
+      // inv_expo_list[i]: 存储了参考帧的逆曝光时间，用于补偿光照变化
       double inv_ref_expo = visual_submap->inv_expo_list[i];
       // ROS_ERROR("inv_ref_expo: %.3lf, state->inv_expo_time: %.3lf\n", inv_ref_expo, state->inv_expo_time);
 
@@ -1771,27 +1812,37 @@ void VIOManager::updateState(cv::Mat img, int level)
         uint8_t *img_ptr = (uint8_t *)img.data + (v_ref_i + x * scale - patch_size_half * scale) * width + u_ref_i - patch_size_half * scale;
         for (int y = 0; y < patch_size; ++y, img_ptr += scale)
         {
+          // 像素x方向梯度du
           float du =
               0.5f *
               ((w_ref_tl * img_ptr[scale] + w_ref_tr * img_ptr[scale * 2] + w_ref_bl * img_ptr[scale * width + scale] +
                 w_ref_br * img_ptr[scale * width + scale * 2]) -
                (w_ref_tl * img_ptr[-scale] + w_ref_tr * img_ptr[0] + w_ref_bl * img_ptr[scale * width - scale] + w_ref_br * img_ptr[scale * width]));
+
+          // 像素y方向梯度dv
           float dv =
               0.5f *
               ((w_ref_tl * img_ptr[scale * width] + w_ref_tr * img_ptr[scale + scale * width] + w_ref_bl * img_ptr[width * scale * 2] +
                 w_ref_br * img_ptr[width * scale * 2 + scale]) -
                (w_ref_tl * img_ptr[-scale * width] + w_ref_tr * img_ptr[-scale * width + scale] + w_ref_bl * img_ptr[0] + w_ref_br * img_ptr[scale]));
 
+          // 计算归一化图像梯度
           Jimg << du, dv;
           Jimg = Jimg * state->inv_expo_time;
           Jimg = Jimg * inv_scale;
-          Jdphi = Jimg * Jdpi * p_hat;
+
+          Jdphi = Jimg * Jdpi * p_hat; // 投影误差对相机归一化坐标的偏导
           Jdp = -Jimg * Jdpi;
+
+          // TODO: 观测误差对 IMU 状态的偏导，从投影空间映射到imu状态空间
           JdR = Jdphi * Jdphi_dR + Jdp * Jdp_dR;
           Jdt = Jdp * Jdp_dt;
 
+          // 当前像素的加权灰度值
           double cur_value =
               w_ref_tl * img_ptr[0] + w_ref_tr * img_ptr[scale] + w_ref_bl * img_ptr[scale * width] + w_ref_br * img_ptr[scale * width + scale];
+          
+          // 构建残差, 乘以逆曝光时间平衡亮度变化
           double res = state->inv_expo_time * cur_value - inv_ref_expo * P[patch_size_total * level + x * patch_size + y];
 
           z(i * patch_size_total + x * patch_size + y) = res;
@@ -1799,6 +1850,7 @@ void VIOManager::updateState(cv::Mat img, int level)
           patch_error += res * res;
           n_meas += 1;
           
+          // 保存 jacobian 如果启用了曝光估计，则 Jacobian 维度为 7
           if (exposure_estimate_en) { H_sub.block<1, 7>(i * patch_size_total + x * patch_size + y, 0) << JdR, Jdt, cur_value; }
           else { H_sub.block<1, 6>(i * patch_size_total + x * patch_size + y, 0) << JdR, Jdt; }
         }
@@ -1828,6 +1880,7 @@ void VIOManager::updateState(cv::Mat img, int level)
       // vec = (*state_propagat) - (*state); G = K*H;
       // (*state) += (-K*z + vec - G*vec);
 
+      // IEKF 计算状态增量
       auto &&H_sub_T = H_sub.transpose();
       H_T_H.setZero();
       G.setZero();
@@ -1835,7 +1888,7 @@ void VIOManager::updateState(cv::Mat img, int level)
       MD(DIM_STATE, DIM_STATE) &&K_1 = (H_T_H + (state->cov / img_point_cov).inverse()).inverse();
       auto &&HTz = H_sub_T * z;
       // K = K_1.block<DIM_STATE,6>(0,0) * H_sub_T;
-      auto vec = (*state_propagat) - (*state);
+      auto vec = (*state_propagat) - (*state); // x_predic - x_k
       G.block<DIM_STATE, 7>(0, 0) = K_1.block<DIM_STATE, 7>(0, 0) * H_T_H.block<7, 7>(0, 0);
       MD(DIM_STATE, 1)
       solution = -K_1.block<DIM_STATE, 7>(0, 0) * HTz + vec - G.block<DIM_STATE, 7>(0, 0) * vec.block<7, 1>(0, 0);

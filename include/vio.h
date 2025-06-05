@@ -92,7 +92,7 @@ public:
   StatesGroup *state; // 当前状态变量
   StatesGroup *state_propagat; // 传播后的状态变量
   
-  M3D Rli, Rci, Rcl, Rcw; // 传感器之间的旋转
+  M3D Rli, Rci, Rcl, Rcw; // 传感器之间的旋转（下标 l:LiDAR; c:Camera; i:imu; w:world）
   M3D Jdphi_dR;
   M3D Jdp_dt;
   M3D Jdp_dR; // jacobian matrix 右扰动
@@ -133,7 +133,8 @@ public:
   bool plot_flag;
 
   Matrix<double, DIM_STATE, DIM_STATE> G, H_T_H;
-  MatrixXd K, H_sub_inv;
+  MatrixXd K;
+  MatrixXd H_sub_inv; // 每个像素重投影模型对RT的jacobian矩阵，R分量在前，T在后
 
   ofstream fout_camera, fout_colmap;
   unordered_map<VOXEL_LOCATION, VOXEL_POINTS *> feat_map; // 全局视觉点体素地图
@@ -154,7 +155,7 @@ public:
   VIOManager();
   ~VIOManager();
 
-  // 反向状态更新
+  // 基于图像重投影误差的IEKF更新
   void updateStateInverse(cv::Mat img, int level);
   
   // 状态更新
@@ -256,6 +257,8 @@ public:
   /// @param plane_map 
   void updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
 
+  /// @brief 预计算视觉特征点在参考观测帧中图像块的重投影误差的jacobian matrix
+  /// @param level 
   void precomputeReferencePatches(int level);
 
   //  导出 COLMAP 数据
