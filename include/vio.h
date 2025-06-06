@@ -165,12 +165,12 @@ public:
   void processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &feat_map, double img_time);
   
   /// @brief 从稀疏视觉地图中检索当前帧可见的点
-  /// @param img 
-  /// @param pg 
-  /// @param plane_map 
+  /// @param img 图像帧
+  /// @param pg lidar 点云
+  /// @param plane_map lidar 点云体素地图
   void retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map);
   
-  /// @brief 生成视觉地图点
+  /// @brief 对没有地图点占据的网格，依次在lidar点，光线投射采样点（保存在visual_submap->add_from_voxel_map）点集中选择高分的shiTomasi点，插入到 feat_map 体素地图中
   /// @param img 图像帧数据
   /// @param pg lidar data with covariance
   void generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg);

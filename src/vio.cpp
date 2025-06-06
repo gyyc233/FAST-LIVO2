@@ -2081,24 +2081,29 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
 
   double t3 = omp_get_wtime();
 
+  // 4. 对没有地图点占据的网格，依次在lidar点，光线投射采样点（保存在visual_submap->add_from_voxel_map）点集中选择高分的shiTomasi点，插入到 feat_map 体素地图中
   generateVisualMapPoints(img, pg);
 
   double t4 = omp_get_wtime();
   
+  // 5. 绘制视觉子地图中的视觉特征点
   plotTrackedPoints();
 
   if (plot_flag) projectPatchFromRefToCur(feat_map);
 
   double t5 = omp_get_wtime();
 
+  // 6. 为视觉特征添加新的图像帧信息
   updateVisualMapPoints(img);
 
   double t6 = omp_get_wtime();
 
+  // 7. 检查视觉点是否收敛，并更新视觉点的参考图像帧
   updateReferencePatch(feat_map);
 
   double t7 = omp_get_wtime();
   
+  // 结果保存为colmap格式
   if(colmap_output_en)  dumpDataForColmap();
 
   frame_count++;
