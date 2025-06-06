@@ -26,7 +26,7 @@ which is included as part of this source code package.
 struct SubSparseMap
 {
   vector<float> propa_errors; // 传播误差
-  vector<float> errors; // residuals
+  vector<float> errors; // residuals of image patches 基于LK光流,图像重投影误差模型创建的残差模型
   vector<vector<float>> warp_patch;
   vector<int> search_levels;
   vector<VisualPoint *> voxel_points; //稀疏地图中的视觉特征点
@@ -132,7 +132,8 @@ public:
   int frame_count = 0;
   bool plot_flag;
 
-  Matrix<double, DIM_STATE, DIM_STATE> G, H_T_H;
+  Matrix<double, DIM_STATE, DIM_STATE> G; // IEKF 迭代卡尔曼滤波的增益系数K
+  Matrix<double, DIM_STATE, DIM_STATE> H_T_H; // IEKF jacobian 矩阵的逆乘以自身
   MatrixXd K;
   MatrixXd H_sub_inv; // 每个像素重投影模型对RT的jacobian矩阵，R分量在前，T在后
 
@@ -155,10 +156,10 @@ public:
   VIOManager();
   ~VIOManager();
 
-  // 基于图像重投影误差的IEKF更新
+  // 基于逆向光流的图像重投影误差的IEKF状态更新，相比于传统LK光流优化了计算效率
   void updateStateInverse(cv::Mat img, int level);
   
-  // 状态更新
+  // 基于光流重投影误差和 IEKF 进行最小二乘状态更新
   void updateState(cv::Mat img, int level);
 
   void processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &feat_map, double img_time);
@@ -197,9 +198,11 @@ public:
   // 计算残差对预测投影点的偏导数，p是相机坐标系坐标（slam 14讲 p186）
   void computeProjectionJacobian(V3D p, MD(2, 3) & J);
 
-  
+  /// @brief 基于LK光流和IEKF进行状态更新（不适用GN增量方程）
+  /// @param img 
   void computeJacobianAndUpdateEKF(cv::Mat img);
 
+  // 重置图像网格状态信息为下一帧数据准备
   void resetGrid();
 
   void updateVisualMapPoints(cv::Mat img);
@@ -277,7 +280,10 @@ public:
   /// @return 
   int getBestSearchLevel(const Matrix2d &A_cur_ref, const int max_level);
 
-  // 双线性插值获取像素值
+  /// @brief 双线性插值获取像素值
+  /// @param img 三通道图像
+  /// @param pc 想要获取像素值的亚像素位置
+  /// @return 
   V3F getInterpolatedPixel(cv::Mat img, V2D pc);
   
   // void resetRvizDisplay();

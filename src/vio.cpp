@@ -177,19 +177,19 @@ void VIOManager::initializeVIO()
 
 void VIOManager::resetGrid()
 {
-  fill(grid_num.begin(), grid_num.end(), TYPE_UNKNOWN);
-  fill(map_index.begin(), map_index.end(), 0); // 每个网格对应的地图索引
-  fill(map_dist.begin(), map_dist.end(), 10000.0f);
+  fill(grid_num.begin(), grid_num.end(), TYPE_UNKNOWN); // 视觉图像网格，标记每个网格类型为未知
+  fill(map_index.begin(), map_index.end(), 0); // 每个网格对应的地图索引，初始为0
+  fill(map_dist.begin(), map_dist.end(), 10000.0f); // 存储每个网格中最近地图点到相机的距离
   fill(update_flag.begin(), update_flag.end(), 0);
-  fill(scan_value.begin(), scan_value.end(), 0.0f);
+  fill(scan_value.begin(), scan_value.end(), 0.0f); // 每个网格中的角点响应值（Shi-Tomasi 分数），用于筛选高质量特征点
 
   retrieve_voxel_points.clear();
   retrieve_voxel_points.resize(length);
 
   append_voxel_points.clear();
-  append_voxel_points.resize(length);
+  append_voxel_points.resize(length); // 用于存储新生成的候选点（如来自 Raycasting 或 LiDAR 点云）
 
-  total_points = 0;
+  total_points = 0; // 记录当前帧中成功追踪的视觉点数量
 }
 
 // void VIOManager::resetRvizDisplay()
@@ -426,6 +426,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
   if (!normal_en) warp_map.clear();
 
+  // step 1. 初始化当前帧深度图，记录每个像素深度
   cv::Mat depth_img = cv::Mat::zeros(height, width, CV_32FC1);
   float *it = (float *)depth_img.data;
 
@@ -443,13 +444,14 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
   for (int i = 0; i < pg.size(); i++)
   {
+    // step 2. 将lidar点转到相机坐标系下
     // double t0 = omp_get_wtime();
 
     V3D pt_w = pg[i].point_w;
 
     for (int j = 0; j < 3; j++)
     {
-      // 计算世界坐标pt_w所属的体素位置
+      // step 3. 计算世界坐标pt_w所属的点云体素位置
       loc_xyz[j] = floor(pt_w[j] / voxel_size);
       if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
     }
@@ -512,6 +514,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
     if (corre_voxel != feat_map.end())
     {
       bool voxel_in_fov = false;
+      // step 4. 在该点云体素中遍历所有视觉特征点，找到距离图像帧最近的视觉特征点，记录它与图像帧的最小深度，更新该网格为被点云地图点占据情况 TYPE_MAP
       // 该体素中的所有视觉特征点
       std::vector<VisualPoint *> &voxel_points = corre_voxel->second->voxel_points;
       int voxel_num = voxel_points.size();
@@ -552,6 +555,9 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
     }
   }
 
+  // step 5. 若某些网格没有被点云地图点占据，则使用 光线投射 Raycasting 方法
+  // 对于没有地图点的网格，使用之前生成的采样点（rays_with_sample_points）进行光线投射，查找这些采样点是否落在 plane_map（来自 LiDAR 平面分割）中的平面上
+  // 如果有有效平面，则将这些候选点加入 visual_submap->add_from_voxel_map
   // TODO: RayCasting Module 光线投射
   if (raycast_en)
   {
@@ -589,7 +595,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         auto corre_sub_feat_map = sub_feat_map.find(sample_pos);
         if (corre_sub_feat_map != sub_feat_map.end()) break;
 
-        // 如果在全局地图 feat_map 中找到了这个体素，则进入后续逻辑继续检查其中的视觉采样点
+        // step 6. 果在全局地图 feat_map 中找到了这个体素，则进入后续逻辑继续检查其中的视觉采样点
         auto corre_feat_map = feat_map.find(sample_pos);
         if (corre_feat_map != feat_map.end())
         {
@@ -646,7 +652,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
           if (voxel_in_fov) sub_feat_map[sample_pos] = 0;
           break;
         }
-        // 全局视觉点体素地图不存在该体素
+        // step 7. 全局视觉点体素地图不存在该体素
         // 在某些区域没有视觉点时，通过 raycasting 从平面地图中提取候选点
         else
         {
@@ -687,6 +693,8 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
   // double t_2, t_3, t_4, t_5;
   // t_2=t_3=t_4=t_5=0;
 
+  // step 8. 筛选高质量视觉点
+
   // 遍历所有网格
   for (int i = 0; i < length; i++)
   {
@@ -704,6 +712,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       V3D pt_cam(new_frame_->w2f(pt->pos_));
       bool depth_continous = false; // 标记该点是否与局部区域的深度值一致
 
+      // 检查该点周围是否有剧烈的深度跳跃
       for (int u = -patch_size_half; u <= patch_size_half; u++)
       {
         for (int v = -patch_size_half; v <= patch_size_half; v++)
@@ -739,6 +748,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       Matrix2d A_cur_ref_zero;
 
       // 为一个3D点 pt 选择最合适的参考图像特征（ref_ftr）
+      // 选择最佳参考帧（ref_patch）
 
       if (!pt->is_normal_initialized_) continue;
 
@@ -800,6 +810,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         if (!pt->getCloseViewObs(new_frame_->pos(), ref_ftr, pc)) continue;
       }
 
+      // step 9. 计算当前视觉帧与参考视觉帧的仿射变换
       if (normal_en)
       {
         // 将当前视觉点的法向量 pt->normal_ 和位置 pt->pos_ 从世界坐标系转换到参考帧（ref_ftr）的相机坐标系下
@@ -852,6 +863,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         warpAffine(A_cur_ref_zero, ref_ftr->img_, ref_ftr->px_, ref_ftr->level_, search_level, pyramid_level, patch_size_half, patch_wrap.data());
       }
 
+      // step 10. 双线性插值计算残差
       // 从当前帧图像中提取以 pc 点为中心的图像块，并使用双线性插值方法进行亚像素级别的采样，结果保存在 patch_buffer 中
       getImagePatch(img, pc, patch_buffer.data(), 0);
 
@@ -908,18 +920,21 @@ void VIOManager::computeJacobianAndUpdateEKF(cv::Mat img)
   // patch_pyrimid_level 由文件配置
   for (int level = patch_pyrimid_level - 1; level >= 0; level--)
   {
-    // 若启用逆向合成则禁用参考补丁缓存
-    // TODO: 这里和LIVO1 不同
-    // TODO: difference of updateStateInverse with updateState
+    // 若启用逆向合成则禁用视觉点参考帧缓存 一般叫 逆光流法，反向光流法 https://blog.csdn.net/guanjing_dream/article/details/129318349
+    // TODO: 这里和LIVO1 不同,使用了逆向光流法提高计算效率
     if (inverse_composition_en)
     {
       has_ref_patch_cache = false;
       updateStateInverse(img, level);
     }
     else
+    {
+      // 在原先的LK光流中，每次迭代都是在当前帧新坐标点附近更新，需要重新计算jacobian和Hessian矩阵
       updateState(img, level);
+    }  
   }
-  // 利用卡尔曼增益 G 对状态协方差矩阵进行修正，从而减小不确定性
+  // 利用迭代卡尔曼增益 G 对状态协方差矩阵进行修正，从而减小不确定性
+  // P=(I-KH)P
   state->cov -= G * state->cov;
   updateFrameState(*state);
 }
@@ -1623,9 +1638,16 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
   {
     double t1 = omp_get_wtime();
     double count_outlier = 0;
-    if (has_ref_patch_cache == false) precomputeReferencePatches(level); // has_ref_patch_cache 在precomputeReferencePatches()内置为true
+
+    // 这里参考视觉帧像素的jacobian只计算了一遍，对比updateState()节约了计算量
+    if (has_ref_patch_cache == false) 
+    {
+      precomputeReferencePatches(level); // has_ref_patch_cache 在precomputeReferencePatches()内置为true
+    }
     int n_meas = 0;
     float error = 0.0;
+
+    // 使用IEKF等价代替GN迭代位姿变换增量
     M3D Rwi(state->rot_end); // 当前帧imu的状态估计旋转
     V3D Pwi(state->pos_end); // 当前帧imu的状态估计平移
     P_wi_hat << SKEW_SYM_MATRX(Pwi);
@@ -1748,6 +1770,7 @@ void VIOManager::updateState(cv::Mat img, int level)
   {
     double t1 = omp_get_wtime();
 
+    // 使用IEKF等价代替GN迭代位姿变换增量
     M3D Rwi(state->rot_end); // 当前帧imu的状态估计旋转
     V3D Pwi(state->pos_end); // 当前帧imu的状态估计平移
     Rcw = Rci * Rwi.transpose(); // 当前帧相机到世界坐标系的旋转
@@ -1881,6 +1904,7 @@ void VIOManager::updateState(cv::Mat img, int level)
       // (*state) += (-K*z + vec - G*vec);
 
       // IEKF 计算状态增量
+      // TODO: IEKF与gauss-newtow法的等效性
       auto &&H_sub_T = H_sub.transpose();
       H_T_H.setZero();
       G.setZero();
@@ -1920,12 +1944,12 @@ void VIOManager::updateFrameState(StatesGroup state)
   V3D Pwi(state.pos_end);
   Rcw = Rci * Rwi.transpose();
   Pcw = -Rci * Rwi.transpose() * Pwi + Pci;
-  new_frame_->T_f_w_ = SE3(Rcw, Pcw);
+  new_frame_->T_f_w_ = SE3(Rcw, Pcw);// 当前帧相机位姿
 }
 
 void VIOManager::plotTrackedPoints()
 {
-  int total_points = visual_submap->voxel_points.size();
+  int total_points = visual_submap->voxel_points.size(); // 视觉子地图，视觉特征点数量
   if (total_points == 0) return;
   // int inlier_count = 0;
   // for (int i = 0; i < img_cp.rows / grid_size; i++)
@@ -1972,13 +1996,23 @@ V3F VIOManager::getInterpolatedPixel(cv::Mat img, V2D pc)
   const float v_ref = pc[1];
   const int u_ref_i = floorf(pc[0]);
   const int v_ref_i = floorf(pc[1]);
+
+  // 当前点距离左上角像素的横向和纵向偏移（范围在 [0,1) 之间）
   const float subpix_u_ref = (u_ref - u_ref_i);
   const float subpix_v_ref = (v_ref - v_ref_i);
+
+  // 计算周围四个像素对该点颜色的权重
   const float w_ref_tl = (1.0 - subpix_u_ref) * (1.0 - subpix_v_ref);
   const float w_ref_tr = subpix_u_ref * (1.0 - subpix_v_ref);
   const float w_ref_bl = (1.0 - subpix_u_ref) * subpix_v_ref;
   const float w_ref_br = subpix_u_ref * subpix_v_ref;
+
+
+  // (uint8_t *)img.data 图像的原始数据指针
+  // 每个像素有 3 个字节（RGB），所以乘以 3
+  // 得到的是左上角像素的数据地址
   uint8_t *img_ptr = (uint8_t *)img.data + ((v_ref_i)*width + (u_ref_i)) * 3;
+
   float B = w_ref_tl * img_ptr[0] + w_ref_tr * img_ptr[0 + 3] + w_ref_bl * img_ptr[width * 3] + w_ref_br * img_ptr[width * 3 + 0 + 3];
   float G = w_ref_tl * img_ptr[1] + w_ref_tr * img_ptr[1 + 3] + w_ref_bl * img_ptr[1 + width * 3] + w_ref_br * img_ptr[width * 3 + 1 + 3];
   float R = w_ref_tl * img_ptr[2] + w_ref_tr * img_ptr[2 + 3] + w_ref_bl * img_ptr[2 + width * 3] + w_ref_br * img_ptr[width * 3 + 2 + 3];
@@ -1990,14 +2024,15 @@ void VIOManager::dumpDataForColmap()
 {
   static int cnt = 1;
   std::ostringstream ss;
-  ss << std::setw(5) << std::setfill('0') << cnt;
+  ss << std::setw(5) << std::setfill('0') << cnt; // 固定长度为5的字符串，前面补0
   std::string cnt_str = ss.str();
   std::string image_path = std::string(ROOT_DIR) + "Log/Colmap/images/" + cnt_str + ".png";
   
   cv::Mat img_rgb_undistort;
-  pinhole_cam->undistortImage(img_rgb, img_rgb_undistort);
+  pinhole_cam->undistortImage(img_rgb, img_rgb_undistort); // 对当前帧图像去畸变
   cv::imwrite(image_path, img_rgb_undistort);
   
+  // 获取当前帧的相机位姿
   Eigen::Quaterniond q(new_frame_->T_f_w_.rotation_matrix());
   Eigen::Vector3d t = new_frame_->T_f_w_.translation();
   fout_colmap << cnt << " "
@@ -2007,6 +2042,8 @@ void VIOManager::dumpDataForColmap()
             << 1 << " "  // CAMERA_ID (假设相机ID为1)
             << cnt_str << ".png" << std::endl;
   fout_colmap << "0.0 0.0 -1" << std::endl;
+  // IMAGE_ID QW QX QY QZ TX TY TZ CAMERA_ID NAME
+  // example: 1 0.707107 0.000000 0.000000 0.707107 0.1 0.2 0.3 1 00001.png
   cnt++;
 }
 
@@ -2021,19 +2058,25 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
   img_cp = img.clone();
   // img_test = img.clone();
 
+  // 转灰度图
   if (img.channels() == 3) cv::cvtColor(img, img, CV_BGR2GRAY);
 
-  new_frame_.reset(new Frame(cam, img));
+  new_frame_.reset(new Frame(cam, img)); // 初始化当前帧图像
+
+  // 1. 基于LIO先验更新当前图像帧状态
   updateFrameState(*state);
   
+  // 重置图像网格信息
   resetGrid();
 
   double t1 = omp_get_wtime();
 
+  // 2. 生成视觉地图
   retrieveFromVisualSparseMap(img, pg, feat_map);
 
   double t2 = omp_get_wtime();
 
+  // 3. 基于LK光流和IEKF更新当前图像帧状态
   computeJacobianAndUpdateEKF(img);
 
   double t3 = omp_get_wtime();
