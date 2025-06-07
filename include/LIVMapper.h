@@ -21,6 +21,8 @@ which is included as part of this source code package.
 #include <nav_msgs/Path.h>
 #include <vikit/camera_loader.h>
 
+// 对 LIVO mapping进行管理，包含了 VIO 和 LIO
+
 class LIVMapper
 {
 public:
@@ -218,7 +220,7 @@ public:
   ros::Publisher pubLaserCloudDynDbg;
   image_transport::Publisher pubImage;
   ros::Publisher mavros_pose_publisher;
-  ros::Timer imu_prop_timer;
+  ros::Timer imu_prop_timer; // 定时器
 
   int frame_num = 0;
   double aver_time_consu = 0;
