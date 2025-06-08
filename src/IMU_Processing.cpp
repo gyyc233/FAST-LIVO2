@@ -537,7 +537,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
 
   /*** undistort each lidar point (backward propagation), ONLY working for LIO
    * update ***/
-  // 2. lidar 点云去畸变 （后相传比）
+  // 2. lidar 点云去畸变 （后向传播）
   if (lidar_meas.lio_vio_flg == LIO)
   {
     auto it_pcl = pcl_wait_proc.points.end() - 1;

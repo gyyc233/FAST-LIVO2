@@ -984,7 +984,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
     {
     // double img_capture_time = meas.lidar_frame_beg_time + exposure_time_init;
     case WAIT:
-    case VIO:
+    case VIO: // 组装lidar点云与imu数据，下一次改为LIO
     {
       // printf("!!! meas.lio_vio_flg: %d \n", meas.lio_vio_flg);
       double img_capture_time = img_time_buffer.front() + exposure_time_init; // 第一个图像帧的时间戳
@@ -1089,7 +1089,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
     }
 
     // 注意：这里的LIO是位于LIVO分支下，是VIO模式结束后切换到LIO的情况
-    case LIO:
+    case LIO: // 组装图像数据，下一次改为VIO
     {
       double img_capture_time = img_time_buffer.front() + exposure_time_init;
       meas.lio_vio_flg = VIO;
@@ -1100,7 +1100,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       struct MeasureGroup m;
       m.vio_time = img_capture_time; // 图像采集时间
       m.lio_time = meas.last_lio_update_time; // 上一次 LIO 更新时间，作为参考时间戳
-      m.img = img_buffer.front(); // 第一帧图像
+      m.img = img_buffer.front(); // 图像帧数据
       mtx_buffer.lock();
       // while ((!imu_buffer.empty() && (imu_time < img_capture_time)))
       // {

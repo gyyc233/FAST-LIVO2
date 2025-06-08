@@ -51,7 +51,7 @@ public:
   void savePCD();
   void processImu();
   
-  // 同步 LiDAR 和 IMU 数据包
+  // 根据模式，组装lidar,imu,image数据
   bool sync_packages(LidarMeasureGroup &meas);
   
   // 单次imu状态传播
