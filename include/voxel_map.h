@@ -248,8 +248,8 @@ public:
   PointCloudXYZI::Ptr feats_down_body_;
   PointCloudXYZI::Ptr feats_down_world_;
 
-  M3D extR_;
-  V3D extT_;
+  M3D extR_; // R of imu to lidar
+  V3D extT_; // T of imu to lidar
 
   float build_residual_time, ekf_time;
   float ave_build_residual_time = 0.0;

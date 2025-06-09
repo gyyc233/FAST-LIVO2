@@ -92,11 +92,17 @@ public:
   StatesGroup *state; // 当前状态变量
   StatesGroup *state_propagat; // 传播后的状态变量
   
-  M3D Rli, Rci, Rcl, Rcw; // 传感器之间的旋转（下标 l:LiDAR; c:Camera; i:imu; w:world）
+  M3D Rli; // 传感器之间的旋转（下标 l:LiDAR; c:Camera; i:imu; w:world）
+  M3D Rci; // 传感器之间的旋转（下标 l:LiDAR; c:Camera; i:imu; w:world）
+  M3D Rcl; // 传感器之间的旋转（下标 l:LiDAR; c:Camera; i:imu; w:world）
+  M3D Rcw; // 传感器之间的旋转（下标 l:LiDAR; c:Camera; i:imu; w:world）
   M3D Jdphi_dR;
   M3D Jdp_dt;
   M3D Jdp_dR; // jacobian matrix 右扰动
-  V3D Pli, Pci, Pcl, Pcw; // 传感器之间的平移
+  V3D Pli; // 传感器之间的平移（下标 l:LiDAR; c:Camera; i:imu; w:world）
+  V3D Pci; // 传感器之间的平移（下标 l:LiDAR; c:Camera; i:imu; w:world）
+  V3D Pcl; // 传感器之间的平移（下标 l:LiDAR; c:Camera; i:imu; w:world）
+  V3D Pcw; // 传感器之间的平移（下标 l:LiDAR; c:Camera; i:imu; w:world）
 
   vector<int> grid_num;
   vector<int> map_index;
@@ -186,6 +192,8 @@ public:
   /// @param P 
   void setLidarToCameraExtrinsic(vector<double> &R, vector<double> &P);
 
+  /// @brief 实例化 `visual_submap`, 加载针孔相机内参，图像尺寸，计算camera到imu的外参,图像网格初始化
+  /// @note 对于图像中的每一个网格，在其中心像素处沿视线方向（即相机光轴方向）生成一系列深度采样点 `rays_with_sample_points`
   void initializeVIO();
 
   /// @brief 从图像中提取以某个点为中心的图像块（patch），并使用双线性插值处理亚像素精度

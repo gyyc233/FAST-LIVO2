@@ -174,8 +174,8 @@ public:
   deque<double> img_time_buffer;
   vector<pointWithVar> _pv_list;
 
-  vector<double> extrinT;
-  vector<double> extrinR;
+  vector<double> extrinT; // T of imu to lidar
+  vector<double> extrinR; // R of imu to lidar
 
   vector<double> cameraextrinT; // lidar-camera extrin translation
   vector<double> cameraextrinR; // lidar-camera extrin rotation

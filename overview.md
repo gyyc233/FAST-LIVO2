@@ -1,7 +1,7 @@
 - [LIVO2流程解析](#livo2流程解析)
   - [LIVMapper 初始化](#livmapper-初始化)
   - [LIVMapper 最外层接口执行](#livmapper-最外层接口执行)
-  - [](#)
+  - [点云预处理](#点云预处理)
 
 # LIVO2流程解析
 
@@ -13,14 +13,14 @@ LIVO2 主流程
 2. LIVMapper::initializeComponents() 初始化 `vio_manager`
    1. 设置系统外参 `VIOManagerPtr vio_manager->setImuToLidarExtrinsic(extT, extR); // imu to lidar` `vio_manager->setLidarToCameraExtrinsic(cameraextrinR, cameraextrinT); // lidar to camera`
    2. `VIOManager::initializeVIO()`: 实例化 `visual_submap`, 加载针孔相机内参，图像尺寸，计算camera到imu的外参,图像网格初始化
-   3. `raycast_en` 对于图像中的每一个网格，在其中心像素处沿视线方向（即相机光轴方向）生成一系列深度采样点 `rays_with_sample_points`
-   4. `ImuProcessPtr p_imu` 初始化 p_imu
+      1. `raycast_en` 对于图像中的每一个网格，在其中心像素处沿视线方向（即相机光轴方向）生成一系列深度采样点 `rays_with_sample_points`
+   3. `ImuProcessPtr p_imu` 初始化 p_imu
 
 ## LIVMapper 最外层接口执行
 
 1. LIVMapper mapper.initializeSubscribersAndPublishers()
    1. lidar 点云回调
-      1. 点云预处理 `PreprocessPtr p_pre->process(msg, ptr);`, save to `lid_raw_data_buffer`
+      1. [点云预处理](#点云预处理) `PreprocessPtr p_pre->process(msg, ptr);`, save to `lid_raw_data_buffer`
    2. imu 回调
       1. 检查imu与lidar时间对齐,ros_driver_fix_en强制硬同步，保存在 `imu_buffer`, `prop_imu_buffer`
    3. image 回调，缓存至 `img_buffer`
@@ -56,6 +56,8 @@ LIVO2 主流程
          6. 点云体素地图滑窗 `VoxelMapManager::mapSliding()` 当系统移动一定距离后，清理超出范围的体素地图数据，以保持地图在机器人周围的有效性并提升性能
    5. LIVMapper::savePCD() 保存pcl点云与(optional)colmap点云 `source: pcl_wait_save`
 
-## 
+## 点云预处理
+
+`void Preprocess::give_feature(pcl::PointCloud<PointType> &pl, vector<orgtype> &types)`
 
 TODO: 
