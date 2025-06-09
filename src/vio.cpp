@@ -1785,7 +1785,7 @@ void VIOManager::updateState(cv::Mat img, int level)
   
     #ifdef MP_EN
       omp_set_num_threads(MP_PROC_NUM);
-      #pragma omp parallel for reduction(+:error, n_meas) # reduction 在每个线程里面对变量 data 进行拷贝，然后在线程当中使用这个拷贝的变量，避免数据竞争
+      #pragma omp parallel for reduction(+:error, n_meas) // reduction 在每个线程里面对变量 data 进行拷贝，然后在线程当中使用这个拷贝的变量，避免数据竞争
     #endif
     for (int i = 0; i < total_points; i++)
     {

@@ -286,6 +286,7 @@ void LIVMapper::stateEstimationAndMapping()
 
 void LIVMapper::handleVIO() 
 {
+  std::cout << "[ VIO ] handleVIO" << std::endl;
   euler_cur = RotMtoEuler(_state.rot_end);
   // 记录预积分之前的状态信息，*57.3 是将弧度转为角度
   fout_pre << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
@@ -347,6 +348,7 @@ void LIVMapper::handleVIO()
 
 void LIVMapper::handleLIO() 
 {
+  std::cout << "[ LIO ] handleLIO" << std::endl;
   // 输出预积分前姿态
   euler_cur = RotMtoEuler(_state.rot_end);
   fout_pre << setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "

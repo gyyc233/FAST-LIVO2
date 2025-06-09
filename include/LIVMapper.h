@@ -44,11 +44,17 @@ public:
   void handleFirstFrame();
   // 状态估计与地图匹配
   void stateEstimationAndMapping();
+
+  // VIO 主流程
   void handleVIO();
+
+  // LIO主流程
   void handleLIO();
 
   /// @brief 保存pcl点云与(optional)colmap点云
   void savePCD();
+
+  // 计算imu误差状态系数矩阵更新 _state，并进行lidar点云去畸变
   void processImu();
   
   // 根据模式，组装lidar,imu,image数据
@@ -92,6 +98,7 @@ public:
   void publish_path(const ros::Publisher pubPath);
   // 可视化发布
 
+  // 从 ROS 参数服务器中读取一系列配置参数
   void readParameters(ros::NodeHandle &nh);
   template <typename T> void set_posestamp(T &out);
   template <typename T> void pointBodyToWorld(const Eigen::Matrix<T, 3, 1> &pi, Eigen::Matrix<T, 3, 1> &po);
@@ -175,7 +182,7 @@ public:
   double IMG_POINT_COV;
 
   PointCloudXYZI::Ptr visual_sub_map; // 当前可视化的子地图
-  PointCloudXYZI::Ptr feats_undistort;
+  PointCloudXYZI::Ptr feats_undistort; // 去畸变lidar点云
   PointCloudXYZI::Ptr feats_down_body;
   PointCloudXYZI::Ptr feats_down_world;
   PointCloudXYZI::Ptr pcl_w_wait_pub;

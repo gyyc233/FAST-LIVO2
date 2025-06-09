@@ -242,7 +242,7 @@ public:
   VoxelMapConfig config_setting_; // 体素地图配置参数
   int current_frame_id_ = 0;
   ros::Publisher voxel_map_pub_;
-  std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map_; // 体素地图
+  std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map_; // lidar点云体素地图
 
   PointCloudXYZI::Ptr feats_undistort_;
   PointCloudXYZI::Ptr feats_down_body_;
