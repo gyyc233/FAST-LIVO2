@@ -139,7 +139,8 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
     // = cov_gyr * (N - 1.0) / N + (cur_gyr - mean_gyr).cwiseProduct(cur_gyr -
     // mean_gyr) * (N - 1.0) / (N * N);
 
-    // cout<<"acc norm: "<<cur_acc.norm()<<" "<<mean_acc.norm()<<endl;
+    // cout<<"cur acc: "<<cur_acc<<" cur acc norm: "<<cur_acc.norm()<<" mean acc norm"<<mean_acc.norm()<<endl;
+    // cout<<"cur gyr acc: "<<cur_gyr<<" mean gyr acc"<<mean_gyr<<endl;
 
     N++;
   }
@@ -299,6 +300,8 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   // cout<<"lidar_meas.lidar_scan_index_now:"<<lidar_meas.lidar_scan_index_now<<endl;
 
   // printf("[ IMU ] last propagation end time: %lf \n", lidar_meas.last_lio_update_time);
+
+  // 当处于LIO模式时
   if (lidar_meas.lio_vio_flg == LIO)
   {
     pcl_wait_proc.resize(lidar_meas.pcl_proc_cur->points.size());
@@ -357,6 +360,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
       auto head = v_imu[i]; // imu 上一帧
       auto tail = v_imu[i + 1]; // imu 下一帧
 
+      // 后一帧的imu时间戳慢与上一次的最后时间戳
       if (tail->header.stamp.toSec() < prop_beg_time) continue;
 
       // 计算平均角速度与加速度
@@ -391,9 +395,11 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
       if (head->header.stamp.toSec() < prop_beg_time)
       {
         // printf("00 \n");
+        // 此处 last_prop_end_time & prop_beg_time 值相同
         // 上一帧结束时间 last_prop_end_time 到当前 tail 时间的间隔作为 dt
         dt = tail->header.stamp.toSec() - last_prop_end_time; // 从上一帧传播结束时间到当前 IMU 数据尾部（tail）的时间差，用于状态传播
         offs_t = tail->header.stamp.toSec() - prop_beg_time; // 当前 IMU 数据相对于当前lidar帧传播开始时间的时间偏移，用于点云去运动畸变
+        std::cout<<"dt: "<<dt<<", offs_t: "<<offs_t<<std::endl;
       }
       else if (i != v_imu.size() - 2) // 当前不是倒数第二个 IMU 数据
       {
@@ -403,6 +409,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
         dt = tail->header.stamp.toSec() - head->header.stamp.toSec(); // 相邻两个 IMU 数据之间的时间间隔
         // offs_t 是该 IMU 对应的时间偏移，用于插值和点云去畸变
         offs_t = tail->header.stamp.toSec() - prop_beg_time;
+        std::cout<<"dt: "<<dt<<", offs_t: "<<offs_t<<std::endl;
       }
       else
       {
@@ -410,6 +417,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
         // printf("22 \n");
         dt = prop_end_time - head->header.stamp.toSec();
         offs_t = prop_end_time - prop_beg_time;
+        std::cout<<"dt: "<<dt<<", offs_t: "<<offs_t<<std::endl;
       }
 
       dt_all += dt;
@@ -473,6 +481,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
       // cout<<setw(20)<<"offset_t: "<<offs_t<<"tail->header.stamp.toSec():
       // "<<tail->header.stamp.toSec()<<endl; printf("[ LIO Propagation ]
       // offs_t: %lf \n", offs_t);
+      // 每次两个imu遍历更新误差状态方程好后，更新imu当时的状态并保存到IMUpose
       IMUpose.push_back(set_pose6d(offs_t, acc_imu, angvel_avr, vel_imu, pos_imu, R_imu));
     }
 
@@ -540,6 +549,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   // 2. lidar 点云去畸变 （后向传播）
   if (lidar_meas.lio_vio_flg == LIO)
   {
+    // 状态量从imu转到lidar
     auto it_pcl = pcl_wait_proc.points.end() - 1;
     M3D extR_Ri(Lid_rot_to_IMU.transpose() * state_inout.rot_end.transpose());
     V3D exrR_extT(Lid_rot_to_IMU.transpose() * Lid_offset_to_IMU);
@@ -624,6 +634,7 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
 
     if (init_iter_num > MAX_INI_COUNT)
     {
+      std::cout<<"init_iter_num: "<<init_iter_num<<", MAX_INI_COUNT: "<<MAX_INI_COUNT<<", imu size: "<<meas.imu.size()<<std::endl;
       // cov_acc *= pow(G_m_s2 / mean_acc.norm(), 2);
       imu_need_init = false;
       ROS_INFO("IMU Initials: Gravity: %.4f %.4f %.4f %.4f; acc covarience: "

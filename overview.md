@@ -2,6 +2,9 @@
   - [LIVMapper 初始化](#livmapper-初始化)
   - [LIVMapper 最外层接口执行](#livmapper-最外层接口执行)
   - [点云预处理](#点云预处理)
+  - [imu 单次状态更新](#imu-单次状态更新)
+  - [imu 初始化](#imu-初始化)
+  - [imu 误差状态矩阵计算与点云去畸变](#imu-误差状态矩阵计算与点云去畸变)
 
 # LIVO2流程解析
 
@@ -26,7 +29,7 @@ LIVO2 主流程
    3. image 回调，缓存至 `img_buffer`
    4. 定时器 imu_prop_callback：
       1. 等待imu初始化，完成一次ekf位姿估计
-      2. 若state_update_flg，基于prop_imu_buffer 数据，进行imu前向传播 prop_imu_once(imu_propagate, dt, acc_imu, omg_imu)，否则只对newest_imu进行传播，更新imu
+      2. 若state_update_flg（该标志在handleVIO handleLIO 中使能），基于prop_imu_buffer 数据，进行[imu前向传播](#imu-单次状态更新) `prop_imu_once(imu_propagate, dt, acc_imu, omg_imu)`，否则只对newest_imu进行传播，更新imu
       3. 提取更新后的imu_propagate发布到 `/LIVO2/imu_propagate`
 2. LIVMapper::run() 
    1. `sync_packages()`，组装数据到`LidarMeasureGroup &meas`->`LidarMeasures`
@@ -38,11 +41,11 @@ LIVO2 主流程
    2. `LIVMapper::handleFirstFrame()` 首帧数据标志
    3. `LIVMapper::processImu()`
       1. `ImuProcess p_imu->Process2(LidarMeasures, _state, feats_undistort);` 计算imu误差状态系数矩阵更新 _state，并进行lidar点云去畸变
-      2. `Forward_without_imu(lidar_meas, stat, *cur_pcl_un_);` 参考FAST-LIO 中的误差状态jacobian进行推导，如果没有imu数据则只对位姿与速度进行更新
-      3. `ImuProcess::IMU_init` imu静止初始化
-      4. `void ImuProcess::UndistortPcl` 参考FAST-LIO imu 误差状态转移方程 (ESKF)前向传播imu data,然后对lidar点云进行去畸变（后向传播）
-      5. `gravityAlignment()` 重力方向对齐
-      6. 将前向传播，后向传播的结果（状态向量与去畸变点云）保存到 `voxelmap_manager->state_ = _state;voxelmap_manager->feats_undistort_ = feats_undistort;`
+         1. `Forward_without_imu(lidar_meas, stat, *cur_pcl_un_);` 参考FAST-LIO 中的误差状态jacobian进行推导，如果没有imu数据则只对位姿与速度进行更新
+         2. `ImuProcess::IMU_init` [imu静止初始化](#imu-初始化)
+         3. `void ImuProcess::UndistortPcl` 参考FAST-LIO imu 误差状态转移方程 (ESKF)前向传播imu data,然后对lidar点云进行去畸变（后向传播）
+      2. `gravityAlignment()` 重力方向对齐
+      3. 将前向传播，后向传播的结果（状态向量与去畸变点云）保存到 `voxelmap_manager->state_ = _state;voxelmap_manager->feats_undistort_ = feats_undistort;`
    4. `LIVMapper::stateEstimationAndMapping() ` 基于`LidarMeasures.lio_vio_flg`执行LIO或者VIO流程
       1. VIO->`LIVMapper::handleVIO()`
          1. VIO 需要等待 `pcl_w_wait_pub` 数据，它在handleLIO中添加数据
@@ -60,4 +63,44 @@ LIVO2 主流程
 
 `void Preprocess::give_feature(pcl::PointCloud<PointType> &pl, vector<orgtype> &types)`
 
-TODO: 
+1. `int Preprocess::plane_judge()` 点云平面检测，基于PCA，计算平面方向向量 `curr_direct`，判断 LiDARFeature 是平面、线、边缘，跳跃等，以及反向跳跃检查
+
+## imu 单次状态更新
+
+根据加计，角速度，时间数据对imu前向传播，在`ImuProcess::IMU_init()`后
+
+`void LIVMapper::prop_imu_once(StatesGroup &imu_prop_state, const double dt, V3D acc_avr, V3D angvel_avr)`
+
+1. 加计归一化并减去bias,陀螺仪减去bias,旋转姿态右乘更新
+2. 加速度转到世界坐标系再加上重力分量
+3. 更新imu传播状态`StatesGroup`
+
+## imu 初始化
+
+1. imu静止，递推方式更新imu平均加速度与平均角速度，估计重力方向，设置初始bias, 初始化完毕打印
+
+## imu 误差状态矩阵计算与点云去畸变
+
+`void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out)`
+
+- 前向传播
+
+将点云保存到`pcl_wait_proc`, imu状态保存到`IMUpose`
+
+1. 减去bias, 计算无偏角速度，无偏加速度
+2. 计算当前和上一次imu缓存数据之间的时间差 当前imu数据两两对比，计算dt offset_t
+   1. 参考FAST-LIO 构造 imu 误差状态转移方程，用于更新系统先验协方差矩阵
+   2. 前向传播imu状态
+   3. 每次两两imu循环后，记录最后一次imu的状态到`IMUpose`
+3. 更新imu状态到`state_inout`
+
+- (if lidar_meas.lio_vio_flg == LIO)lidar点云去畸变 后向传播
+
+1. 对于lidar点云开始与结束时间戳，记录对应的imu开始结束运动状态，对lidar点云按时间戳从后往前进行运动插值
+2. 将lidar点云按照这个时间段内imu加速度，角速度，对齐到最后时间戳
+3. 再把lidar点转到imu坐标系，再转世界坐标系
+4. pcl_out = pcl_wait_proc lidar点云去畸变完成
+
+这里使用的是基于 IMU 积分得到的旋转矩阵和线性加速度 进行积分与变换，而不是使用球面四元数插值（Spherical Linear Interpolation, SLERP）
+
+TODO: 多线雷达如何处理

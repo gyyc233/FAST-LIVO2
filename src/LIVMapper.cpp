@@ -607,6 +607,7 @@ void LIVMapper::prop_imu_once(StatesGroup &imu_prop_state, const double dt, V3D 
 
 void LIVMapper::imu_prop_callback(const ros::TimerEvent &e)
 {
+  // 用 IMU 数据对系统状态进行前向传播（预测）
   // 等待imu初始化完成
   if (p_imu->imu_need_init || !new_imu || !ekf_finish_once) { return; }
 
@@ -615,6 +616,7 @@ void LIVMapper::imu_prop_callback(const ros::TimerEvent &e)
   if (imu_prop_enable && !prop_imu_buffer.empty())
   {
     static double last_t_from_lidar_end_time = 0;
+    // state_update_flg 在handleLIO handleVIO中变为true
     if (state_update_flg)
     {
       imu_propagate = latest_ekf_state;
