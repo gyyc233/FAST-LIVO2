@@ -396,6 +396,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
   // double t0 = omp_get_wtime();
 
   // 1. 将点转到世界坐标系并计算点的测量协方差与反对称矩阵
+  std::cout<<"[ VoxelMapManager::StateEstimation calculate lidar point body covariance ]"<<std::endl;
   for (size_t i = 0; i < feats_down_body_->size(); i++)
   {
     V3D point_this(feats_down_body_->points[i].x, feats_down_body_->points[i].y, feats_down_body_->points[i].z);
@@ -421,15 +422,18 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
   H_T_H.setZero();
   I_STATE.setIdentity();
 
-  bool flg_EKF_inited, flg_EKF_converged, EKF_stop_flg = 0;
+  // bool flg_EKF_inited;
+  bool flg_EKF_converged, EKF_stop_flg = 0;
   for (int iterCount = 0; iterCount < config_setting_.max_iterations_; iterCount++)
   {
+    std::cout<<"[ VoxelMapManager::StateEstimation IEKF iterator num ] "<<iterCount<<std::endl;
     double total_residual = 0.0;
     pcl::PointCloud<pcl::PointXYZI>::Ptr world_lidar(new pcl::PointCloud<pcl::PointXYZI>);
     // 将feats_down_body_点从body坐标系转到世界坐标系
     TransformLidar(state_.rot_end, state_.pos_end, feats_down_body_, world_lidar);
     M3D rot_var = state_.cov.block<3, 3>(0, 0);
     M3D t_var = state_.cov.block<3, 3>(3, 3);
+    std::cout<<"[ VoxelMapManager::StateEstimation ] estimate lidar point world covariance"<<std::endl;
     for (size_t i = 0; i < feats_down_body_->size(); i++)
     {
       pointWithVar &pv = pv_list_[i];
@@ -465,15 +469,17 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
     effct_feat_num_ = ptpl_list_.size();
     cout << "[ LIO ] Raw feature num: " << feats_undistort_->size() << ", downsampled feature num:" << feats_down_size_ 
-         << " effective feature num: " << effct_feat_num_ << " average residual: " << total_residual / effct_feat_num_ << endl;
+         << " effective feature num( icp success points): " << effct_feat_num_ << " average residual (points to plane distance) : " << total_residual / effct_feat_num_ << endl;
 
-    /*** Computation of Measuremnt Jacobian matrix H and measurents covarience
+    /*** Computation of Measurement Jacobian matrix H and measurements covariance
      * ***/
+    std::cout<<"[ VoxelMapManager::StateEstimation ] ESIKF predict"<<std::endl;
     MatrixXd Hsub(effct_feat_num_, 6);
     MatrixXd Hsub_T_R_inv(6, effct_feat_num_);
     VectorXd R_inv(effct_feat_num_);
     VectorXd meas_vec(effct_feat_num_);
     meas_vec.setZero();
+    std::cout<<"[ VoxelMapManager::StateEstimation ] ESIKF computation of Measurement Jacobian matrix H and measurements covariance"<<std::endl;
     for (int i = 0; i < effct_feat_num_; i++)
     {
       auto &ptpl = ptpl_list_[i];
@@ -542,6 +548,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
       meas_vec(i) = -ptpl_list_[i].dis_to_plane_;
     }
 
+    std::cout<<"[ VoxelMapManager::StateEstimation ] ESIKF terative Kalman Filter Update"<<std::endl;
     EKF_stop_flg = false;
     flg_EKF_converged = false; // EKF 是否已经收敛
     /*** Iterative Kalman Filter Update ***/
@@ -579,6 +586,10 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
     int minRow, minCol;
     // x_(k+1) = x_k ⊞ dx
+    std::cout<<"[ VoxelMapManager::StateEstimation ] ESIKF update delta x_k: "<<flg_EKF_converged<<std::endl;
+    StatesGroup delta_x_k;
+    delta_x_k = solution;
+    std::cout<<"[ VoxelMapManager::StateEstimation ] delta x_k: \r\n"<<delta_x_k<<std::endl;
     state_ += solution;
 
     // 提取旋转和平移增量
@@ -587,6 +598,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
     // 如果旋转和平移的变化足够小，则认为 EKF 收敛
     if ((rot_add.norm() * 57.3 < 0.01) && (t_add.norm() * 100 < 0.015)) { flg_EKF_converged = true; }
+    std::cout<<"[ VoxelMapManager::StateEstimation ] ESIKF flg_EKF_converged: "<<flg_EKF_converged<<", rot_add.norm() * 57.3: "<<rot_add.norm() * 57.3<<", t_add.norm() * 100: "<<t_add.norm() * 100<<std::endl;
     V3D euler_cur = state_.rot_end.eulerAngles(2, 1, 0);
 
     /*** Rematch Judgement ***/
@@ -600,6 +612,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     if (!EKF_stop_flg && (rematch_num >= 2 || (iterCount == config_setting_.max_iterations_ - 1)))
     {
       /*** Covariance Update ***/
+      std::cout<<"[ VoxelMapManager::StateEstimation ] ESIKF update covariance, itertor count: "<<iterCount<<std::endl;
       // _state.cov = (I_STATE - G) * _state.cov; TODO: 这里可以看看到G变量的定义
       // P_k+1 = (I - KH)P_k
       state_.cov.block<DIM_STATE, DIM_STATE>(0, 0) =
@@ -649,6 +662,7 @@ void VoxelMapManager::TransformLidar(const Eigen::Matrix3d rot, const Eigen::Vec
 
 void VoxelMapManager::BuildVoxelMap()
 {
+  std::cout<<"[ VoxelMapManager ] "<<" build lidar voxel map start"<<std::endl;
   float voxel_size = config_setting_.max_voxel_size_;
   float planer_threshold = config_setting_.planner_threshold_;
   int max_layer = config_setting_.max_layer_;
@@ -718,6 +732,8 @@ void VoxelMapManager::BuildVoxelMap()
   {
     iter->second->init_octo_tree();
   }
+
+  std::cout<<"[ VoxelMapManager ] "<<" build lidar voxel map end"<<std::endl;
 }
 
 V3F VoxelMapManager::RGBFromVoxel(const V3D &input_point)
@@ -773,6 +789,7 @@ void VoxelMapManager::UpdateVoxelMap(const std::vector<pointWithVar> &input_poin
 
 void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, std::vector<PointToPlane> &ptpl_list)
 {
+  std::cout<<"[ VoxelMapManager::BuildResidualListOMP ] build residual (point to plane of lidar voxel map distance) list with OMP"<<std::endl;
   int max_layer = config_setting_.max_layer_;
   double voxel_size = config_setting_.max_voxel_size_;
   double sigma_num = config_setting_.sigma_num_;
@@ -781,6 +798,9 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
   std::vector<PointToPlane> all_ptpl_list(pv_list.size());
   std::vector<bool> useful_ptpl(pv_list.size());
   std::vector<size_t> index(pv_list.size());
+
+  std::vector<int> unuse_ptpl_list; // 平面匹配失败点
+
   for (size_t i = 0; i < index.size(); ++i)
   {
     index[i] = i;
@@ -848,8 +868,15 @@ void VoxelMapManager::BuildResidualListOMP(std::vector<pointWithVar> &pv_list, s
   }
   for (size_t i = 0; i < useful_ptpl.size(); i++)
   {
-    if (useful_ptpl[i]) { ptpl_list.push_back(all_ptpl_list[i]); }
+    if (useful_ptpl[i]) {
+      ptpl_list.push_back(all_ptpl_list[i]);
+    }
+    else{
+      unuse_ptpl_list.push_back(0);
+    }
   }
+  std::cout<<"[ VoxelMapManager::BuildResidualListOMP ] success match number: "<<ptpl_list.size()<<std::endl;
+  std::cout<<"[ VoxelMapManager::BuildResidualListOMP ] unsuccess match number: "<<unuse_ptpl_list.size()<<std::endl;
 }
 
 void VoxelMapManager::build_single_residual(pointWithVar &pv, const VoxelOctoTree *current_octo, const int current_layer, bool &is_sucess,

@@ -262,6 +262,7 @@ void ImuProcess::Forward_without_imu(LidarMeasureGroup &meas, StatesGroup &state
 
 void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out)
 {
+  std::cout<<"[ ImuProcess::UndistortPcl ] imu error state update and undistort lidar point"<<std::endl;
   double t0 = omp_get_wtime();
   pcl_out.clear();
   /*** add the imu of the last frame-tail to the of current frame-head ***/
@@ -399,7 +400,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
         // 上一帧结束时间 last_prop_end_time 到当前 tail 时间的间隔作为 dt
         dt = tail->header.stamp.toSec() - last_prop_end_time; // 从上一帧传播结束时间到当前 IMU 数据尾部（tail）的时间差，用于状态传播
         offs_t = tail->header.stamp.toSec() - prop_beg_time; // 当前 IMU 数据相对于当前lidar帧传播开始时间的时间偏移，用于点云去运动畸变
-        std::cout<<"dt: "<<dt<<", offs_t: "<<offs_t<<std::endl;
+        // std::cout<<"dt: "<<dt<<", offs_t: "<<offs_t<<std::endl;
       }
       else if (i != v_imu.size() - 2) // 当前不是倒数第二个 IMU 数据
       {
@@ -409,7 +410,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
         dt = tail->header.stamp.toSec() - head->header.stamp.toSec(); // 相邻两个 IMU 数据之间的时间间隔
         // offs_t 是该 IMU 对应的时间偏移，用于插值和点云去畸变
         offs_t = tail->header.stamp.toSec() - prop_beg_time;
-        std::cout<<"dt: "<<dt<<", offs_t: "<<offs_t<<std::endl;
+        // std::cout<<"dt: "<<dt<<", offs_t: "<<offs_t<<std::endl;
       }
       else
       {
@@ -417,7 +418,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
         // printf("22 \n");
         dt = prop_end_time - head->header.stamp.toSec();
         offs_t = prop_end_time - prop_beg_time;
-        std::cout<<"dt: "<<dt<<", offs_t: "<<offs_t<<std::endl;
+        // std::cout<<"dt: "<<dt<<", offs_t: "<<offs_t<<std::endl;
       }
 
       dt_all += dt;

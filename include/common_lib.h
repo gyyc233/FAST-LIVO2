@@ -20,6 +20,7 @@ which is included as part of this source code package.
 #include <sensor_msgs/Imu.h>
 #include <sophus/se3.h>
 #include <tf/transform_broadcaster.h>
+#include <iostream>
 
 using namespace std;
 using namespace Eigen;
@@ -173,6 +174,18 @@ struct StatesGroup
     return *this;
   };
 
+  StatesGroup &operator=(const Matrix<double, DIM_STATE, 1> &state)
+  {
+    this->rot_end = Exp(state(0, 0), state(1, 0), state(2, 0));
+    this->pos_end = state.block<3, 1>(3, 0);
+    this->inv_expo_time = state(6, 0);
+    this->vel_end = state.block<3, 1>(7, 0);
+    this->bias_g = state.block<3, 1>(10, 0);
+    this->bias_a = state.block<3, 1>(13, 0);
+    this->gravity = state.block<3, 1>(16, 0);
+    return *this;
+  };
+
   // 状态加法
   StatesGroup operator+(const Matrix<double, DIM_STATE, 1> &state_add)
   {
@@ -216,6 +229,18 @@ struct StatesGroup
     a.block<3, 1>(16, 0) = this->gravity - b.gravity;
     return a;
   };
+
+  friend std::ostream& operator<<(std::ostream& os, const StatesGroup& b){
+    os<<"rot_end: "<<b.rot_end.transpose()<<std::endl;
+    os<<"pos_end: "<<b.pos_end.transpose()<<std::endl;
+    os<<"inv_expo_time: "<<b.inv_expo_time<<std::endl;
+    os<<"vel_end: "<<b.vel_end.transpose()<<std::endl;
+    // os<<"bias_g: "<<b.bias_g.transpose()<<std::endl;
+    // os<<"bias_a: "<<b.bias_a.transpose()<<std::endl;
+    // os<<"gravity: "<<b.gravity.transpose()<<std::endl;
+
+    return os;
+  }
 
   void resetpose()
   {

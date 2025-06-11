@@ -99,7 +99,7 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
   pl_full.clear();
   double t1 = omp_get_wtime();
   int plsize = msg->point_num;
-  printf("[ Preprocess ] Input point number: %d \n", plsize);
+  printf("[ LiDAR Preprocess avia_handler ] Input point number: %d \n", plsize);
   // printf("point_filter_num: %d\n", point_filter_num);
 
   pl_corn.reserve(plsize);
@@ -197,7 +197,7 @@ void Preprocess::avia_handler(const livox_ros_driver::CustomMsg::ConstPtr &msg)
       }
     }
   }
-  printf("[ Preprocess ] Output point number: %zu \n", pl_surf.points.size());
+  printf("[ LiDAR Preprocess avia_handler ] remove blind_sqr points, output point number: %zu \n", pl_surf.points.size());
 }
 
 void Preprocess::l515_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
@@ -379,6 +379,7 @@ void Preprocess::velodyne_handler(const sensor_msgs::PointCloud2::ConstPtr &msg)
     }
   }
 
+  // 这里默认不使能
   if (feature_enabled)
   {
     for (int i = 0; i < N_SCANS; i++)

@@ -255,7 +255,10 @@ void LIVMapper::processImu()
   // 计算imu误差状态系数矩阵更新 _state，并进行lidar点云去畸变
   p_imu->Process2(LidarMeasures, _state, feats_undistort);
 
-  if (gravity_align_en) gravityAlignment();
+  // 默认不使用重力对齐
+  if (gravity_align_en){
+    gravityAlignment();
+  } 
 
   // 为后续地图构建和匹配提供最新位姿与点云信息
   state_propagat = _state;
@@ -354,7 +357,7 @@ void LIVMapper::handleLIO()
   fout_pre << setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
            << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose() << " "
            << _state.bias_a.transpose() << " " << V3D(_state.inv_expo_time, 0, 0).transpose() << endl;
-           
+
   if (feats_undistort->empty() || (feats_undistort == nullptr)) 
   {
     std::cout << "[ LIO ]: No point!!!" << std::endl;
@@ -365,7 +368,7 @@ void LIVMapper::handleLIO()
 
   downSizeFilterSurf.setInputCloud(feats_undistort);
   downSizeFilterSurf.filter(*feats_down_body);
-  
+
   double t_down = omp_get_wtime();
 
   feats_down_size = feats_down_body->points.size();
@@ -384,7 +387,8 @@ void LIVMapper::handleLIO()
 
   double t1 = omp_get_wtime();
 
-  // 使用地图数据优化当前状态
+  // 使用地图数据优化当前状态, state_propagat里面的重力已经对齐过了
+  std::cout<<"[ handleLIO ] StateEstimation"<<std::endl;
   voxelmap_manager->StateEstimation(state_propagat);
   _state = voxelmap_manager->state_;
   _pv_list = voxelmap_manager->pv_list_;
@@ -447,15 +451,19 @@ void LIVMapper::handleLIO()
   }
   // 使用更新后的点云和协方差更新体素地图
   voxelmap_manager->UpdateVoxelMap(voxelmap_manager->pv_list_);
-  std::cout << "[ LIO ] Update Voxel Map" << std::endl;
+  std::cout << "[ LIO ] Update lidar Voxel Map" << std::endl;
   _pv_list = voxelmap_manager->pv_list_;
   
   double t4 = omp_get_wtime();
 
-  // 启用滑窗机制
+  // 启用滑窗机制(默认居然是关闭，阿米诺斯)
   if(voxelmap_manager->config_setting_.map_sliding_en)
   {
+    std::cout << "[ LIO ] enable voxel map sliding" << std::endl;
     voxelmap_manager->mapSliding();
+  }
+  else{
+    std::cout << "[ LIO ] disable voxel map sliding" << std::endl;
   }
   
   // 完整点云转到world
@@ -496,8 +504,8 @@ void LIVMapper::handleLIO()
   printf("\033[1;34m| %-29s | %-27s |\033[0m\n", "Algorithm Stage", "Time (secs)");
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
   printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "DownSample", t_down - t0);
-  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "ICP", t2 - t1);
-  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "updateVoxelMap", t4 - t3);
+  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "ICP(estimate residual and ESIKF)", t2 - t1);
+  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "updateVoxelMap ans sliding voxel map", t4 - t3);
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
   printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Current Total Time", t4 - t0);
   printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Average Total Time", aver_time_consu);
@@ -754,6 +762,7 @@ void LIVMapper::standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
   last_timestamp_lidar = cur_head_time;
 
   mtx_buffer.unlock();
+  // std::cout<<"[ LIVMapper::standard_pcl_cbk ] sig_buffer.notify_all"<<std::endl;
   sig_buffer.notify_all();
 }
 
@@ -797,6 +806,7 @@ void LIVMapper::livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg_i
   last_timestamp_lidar = cur_head_time;
 
   mtx_buffer.unlock();
+  // std::cout<<"[ LIVMapper::livox_pcl_cbk ] sig_buffer.notify_all"<<std::endl;
   sig_buffer.notify_all();
 }
 
@@ -851,6 +861,8 @@ void LIVMapper::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
     new_imu = true;
     mtx_buffer_imu_prop.unlock();
   }
+
+  // std::cout<<"[ LIVMapper::imu_cbk ] sig_buffer.notify_all"<<std::endl;
   sig_buffer.notify_all();
 }
 
@@ -913,6 +925,8 @@ void LIVMapper::img_cbk(const sensor_msgs::ImageConstPtr &msg_in)
   // cv::waitKey(1);
   // cout<<"last_timestamp_img:::"<<last_timestamp_img<<endl;
   mtx_buffer.unlock();
+
+  // std::cout<<"[ LIVMapper::img_cbk ] sig_buffer.notify_all"<<std::endl;
   sig_buffer.notify_all();
 }
 
@@ -966,10 +980,12 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
     lid_raw_data_buffer.pop_front();
     lid_header_time_buffer.pop_front();
     mtx_buffer.unlock();
+    // std::cout<<"[ LIVMapper::sync_packages ]ONLY_LIO sig_buffer notify_all"<<std::endl;
     sig_buffer.notify_all();
 
-   // 组装LI数据
+    // 组装LI数据
     meas.lio_vio_flg = LIO; // process lidar topic, so timestamp should be lidar scan end.
+    // std::cout<<"[ LIVMapper::sync_packages ]meas.lio_vio_flg = LIO"<<std::endl;
     meas.measures.push_back(m);
     // ROS_INFO("ONlY HAS LiDAR and IMU, NO IMAGE!");
     lidar_pushed = false; // sync one whole lidar scan.
@@ -1044,6 +1060,8 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
         // imu_buffer.front()->header.stamp.toSec());
       }
       mtx_buffer.unlock();
+
+      // std::cout<<"[ LIVMapper::sync_packages ]LIVO->VIO sig_buffer notify_all"<<std::endl;
       sig_buffer.notify_all();
 
       *(meas.pcl_proc_cur) = *(meas.pcl_proc_next);
@@ -1063,6 +1081,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
         double frame_header_time(lid_header_time_buffer.front());
         float max_offs_time_ms = (m.lio_time - frame_header_time) * 1000.0f;
 
+        std::cout<<"[ LIVMapper::sync_packages ] pcl.size(): "<<pcl.size()<<std::endl;
         for (int i = 0; i < pcl.size(); i++)
         {
           auto pt = pcl[i];
@@ -1077,6 +1096,8 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
             meas.pcl_proc_next->points.push_back(pt); // 加入下一帧
           }
         }
+        std::cout<<"[ LIVMapper::sync_packages ] meas.pcl_proc_cur->points.size(): "<<meas.pcl_proc_cur->points.size()<<std::endl;
+        std::cout<<"[ LIVMapper::sync_packages ] meas.pcl_proc_next->points.size(): "<<meas.pcl_proc_next->points.size()<<std::endl;
         lid_raw_data_buffer.pop_front();
         lid_header_time_buffer.pop_front();
       }
@@ -1084,6 +1105,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       // 组装 MeasureGroup 并返回 true，供主线程进行 LIO 更新
       meas.measures.push_back(m);
       meas.lio_vio_flg = LIO;
+      // std::cout<<"[ LIVMapper::sync_packages ]LIVO->VIO meas.lio_vio_flg = LIO;"<<std::endl;
       // meas.last_lio_update_time = m.lio_time;
       // printf("!!! meas.lio_vio_flg: %d \n", meas.lio_vio_flg);
       // printf("[ Data Cut ] pcl_proc_cur number: %d \n", meas.pcl_proc_cur
@@ -1121,6 +1143,8 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       img_time_buffer.pop_front();
 
       mtx_buffer.unlock();
+      // std::cout<<"[ LIVMapper::sync_packages ]LIVO->LIO sig_buffer notify_all"<<std::endl;
+      // std::cout<<"[ LIVMapper::sync_packages ]LIVO->LIO meas.lio_vio_flg = VIO;"<<std::endl;
       sig_buffer.notify_all();
 
       // 将包含图像和 IMU 时间范围的 MeasureGroup 添加进 meas.measures
@@ -1158,9 +1182,12 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
     lid_raw_data_buffer.pop_front();
     lid_header_time_buffer.pop_front();
     mtx_buffer.unlock();
+
+    // std::cout<<"[ LIVMapper::sync_packages ]ONLY_LO sig_buffer notify_all"<<std::endl;
     sig_buffer.notify_all();
     lidar_pushed = false; // sync one whole lidar scan.
     meas.lio_vio_flg = LO; // process lidar topic, so timestamp should be lidar scan end.
+    // std::cout<<"[ LIVMapper::sync_packages ]ONLY_LO meas.lio_vio_flg = LO;"<<std::endl;
     meas.measures.push_back(m);
     return true;
     break;

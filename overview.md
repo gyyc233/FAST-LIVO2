@@ -5,6 +5,7 @@
   - [imu 单次状态更新](#imu-单次状态更新)
   - [imu 初始化](#imu-初始化)
   - [imu 误差状态矩阵计算与点云去畸变](#imu-误差状态矩阵计算与点云去畸变)
+  - [重力方向对齐](#重力方向对齐)
 
 # LIVO2流程解析
 
@@ -44,13 +45,13 @@ LIVO2 主流程
          1. `Forward_without_imu(lidar_meas, stat, *cur_pcl_un_);` 参考FAST-LIO 中的误差状态jacobian进行推导，如果没有imu数据则只对位姿与速度进行更新
          2. `ImuProcess::IMU_init` [imu静止初始化](#imu-初始化)
          3. `void ImuProcess::UndistortPcl` 参考FAST-LIO imu 误差状态转移方程 (ESKF)前向传播imu data,然后对lidar点云进行去畸变（后向传播）
-      2. `gravityAlignment()` 重力方向对齐
+      2. `gravityAlignment()` [重力方向对齐](#重力方向对齐)，原配置文件默认不执行，在imu初始化完成后执行一次
       3. 将前向传播，后向传播的结果（状态向量与去畸变点云）保存到 `voxelmap_manager->state_ = _state;voxelmap_manager->feats_undistort_ = feats_undistort;`
    4. `LIVMapper::stateEstimationAndMapping() ` 基于`LidarMeasures.lio_vio_flg`执行LIO或者VIO流程
-      1. VIO->`LIVMapper::handleVIO()`
+      1. [VIO->`LIVMapper::handleVIO()`](./handleVIO.md)
          1. VIO 需要等待 `pcl_w_wait_pub` 数据，它在handleLIO中添加数据
          2. `VIOManager::processFrame` VIO主要流程
-      2. LIO and LO->`LIVMapper::handleLIO()`
+      2. [LIO and LO->`LIVMapper::handleLIO()`](./handleLIO.md)
          1. lidar点云转世界坐标系 `voxelmap_manager->feats_down_world_`
          2. 创建lidar点云体素地图 `VoxelMapManager::BuildVoxelMap()` 对点云距离不确定度和方位不确定度建模，构建点云体素地图 `std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map_`
          3. `VoxelMapManager::StateEstimation(StatesGroup &state_propagat)` ESIKF 迭代kalman 更新状态量
@@ -61,9 +62,10 @@ LIVO2 主流程
 
 ## 点云预处理
 
-`void Preprocess::give_feature(pcl::PointCloud<PointType> &pl, vector<orgtype> &types)`
+(默认不触发)对每个scan应用 `void Preprocess::give_feature(pcl::PointCloud<PointType> &pl, vector<orgtype> &types)`
 
-1. `int Preprocess::plane_judge()` 点云平面检测，基于PCA，计算平面方向向量 `curr_direct`，判断 LiDARFeature 是平面、线、边缘，跳跃等，以及反向跳跃检查
+1. (默认不触发)`int Preprocess::plane_judge()` 点云平面检测，基于PCA，计算平面方向向量 `curr_direct`，判断 LiDARFeature 是平面、线、边缘，跳跃等，以及反向跳跃检查
+2. 去除盲区点云
 
 ## imu 单次状态更新
 
@@ -103,4 +105,21 @@ LIVO2 主流程
 
 这里使用的是基于 IMU 积分得到的旋转矩阵和线性加速度 进行积分与变换，而不是使用球面四元数插值（Spherical Linear Interpolation, SLERP）
 
-TODO: 多线雷达如何处理
+## 重力方向对齐
+
+`void LIVMapper::gravityAlignment() ` 
+
+```cpp
+   V3D ez(0, 0, -1); // 理想世界坐标系下重力方向 
+   V3D gz(_state.gravity);
+   // Quaterniond::FromTwoVectors 根据两个向量，得到旋转
+   // 将 IMU 估计的重力方向 gz 转换为世界坐标系方向 ez，得到一个旋转向量 G_q_I0
+   Quaterniond G_q_I0 = Quaterniond::FromTwoVectors(gz, ez);
+   M3D G_R_I0 = G_q_I0.toRotationMatrix();
+
+    // 将imu初始坐标系与世界坐标系对齐
+    _state.pos_end = G_R_I0 * _state.pos_end;
+    _state.rot_end = G_R_I0 * _state.rot_end;
+    _state.vel_end = G_R_I0 * _state.vel_end;
+    _state.gravity = G_R_I0 * _state.gravity;
+```

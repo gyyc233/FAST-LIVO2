@@ -245,8 +245,8 @@ public:
   std::unordered_map<VOXEL_LOCATION, VoxelOctoTree *> voxel_map_; // lidar点云体素地图
 
   PointCloudXYZI::Ptr feats_undistort_;
-  PointCloudXYZI::Ptr feats_down_body_;
-  PointCloudXYZI::Ptr feats_down_world_;
+  PointCloudXYZI::Ptr feats_down_body_; // lidar body　坐标系下点云
+  PointCloudXYZI::Ptr feats_down_world_; // lidar 世界坐标系下点云
 
   M3D extR_; // R of imu to lidar
   V3D extT_; // T of imu to lidar
