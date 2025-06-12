@@ -407,6 +407,10 @@ double VIOManager::calculateNCC(float *ref_patch, float *cur_patch, int patch_si
   return numerator / sqrt(demoniator1 * demoniator2 + 1e-10);
 }
 
+/// @brief 从稀疏视觉地图中检索当前帧可见的点
+/// @param img 图像帧
+/// @param pg lidar 点云
+/// @param plane_map lidar 点云体素地图
 void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map)
 {
   if (feat_map.size() <= 0) return;
@@ -1940,11 +1944,13 @@ void VIOManager::updateState(cv::Mat img, int level)
 
 void VIOManager::updateFrameState(StatesGroup state)
 {
+  std::cout<<"[ VIOManager::updateFrameState ] state:\n"<<state<<std::endl;
   M3D Rwi(state.rot_end);
   V3D Pwi(state.pos_end);
   Rcw = Rci * Rwi.transpose();
   Pcw = -Rci * Rwi.transpose() * Pwi + Pci;
   new_frame_->T_f_w_ = SE3(Rcw, Pcw);// 当前帧相机位姿
+  // std::cout<<"[ VIOManager::updateFrameState ] camera(SE_c_w) coordination new_frame_->T_f_w_(SE3:[R,T]):\n"<<new_frame_->T_f_w_<<std::endl;
 }
 
 void VIOManager::plotTrackedPoints()

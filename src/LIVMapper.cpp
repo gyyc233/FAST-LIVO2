@@ -303,7 +303,7 @@ void LIVMapper::handleVIO()
     return;
   }
     
-  // 当前帧提取的特征点数量
+  // 当前帧lidar点数量
   std::cout << "[ VIO ] Raw feature num: " << pcl_w_wait_pub->points.size() << std::endl;
 
   // 是否到达指定的绘制时间
