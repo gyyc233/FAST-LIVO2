@@ -245,6 +245,7 @@ void LIVMapper::gravityAlignment()
     _state.gravity = G_R_I0 * _state.gravity;
     gravity_align_finished = true;
     std::cout << "Gravity Alignment Finished" << std::endl;
+    std::cout <<" state\n"<<_state<<std::endl;
   }
 }
 
@@ -509,6 +510,7 @@ void LIVMapper::handleLIO()
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
   printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Current Total Time", t4 - t0);
   printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Average Total Time", aver_time_consu);
+  printf("\033[1;34m|                         End of handle LIO                    |\033[0m\n");
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
 
   euler_cur = RotMtoEuler(_state.rot_end);
@@ -932,9 +934,18 @@ void LIVMapper::img_cbk(const sensor_msgs::ImageConstPtr &msg_in)
 
 bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
 {
-  if (lid_raw_data_buffer.empty() && lidar_en) return false;
-  if (img_buffer.empty() && img_en) return false;
-  if (imu_buffer.empty() && imu_en) return false;
+  if (lid_raw_data_buffer.empty() && lidar_en){
+    return false;
+  }
+  if (img_buffer.empty() && img_en){
+    return false;
+  }
+  if (imu_buffer.empty() && imu_en){
+    return false;
+  } 
+  // std::cout<<"[ LIVMapper::sync_packages ] lid_raw_data_buffer size: "<<lid_raw_data_buffer.size()<<std::endl;
+  // std::cout<<"[ LIVMapper::sync_packages ] img_buffer size: "<<img_buffer.size()<<std::endl;
+  // std::cout<<"[ LIVMapper::sync_packages ] imu_buffer size: "<<imu_buffer.size()<<std::endl;
 
   switch (slam_mode_)
   {
@@ -945,7 +956,10 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
     {
       // If not push the lidar into measurement data buffer
       meas.lidar = lid_raw_data_buffer.front(); // push the first lidar topic
-      if (meas.lidar->points.size() <= 1) return false;
+      if (meas.lidar->points.size() <= 1){
+        // std::cout<<"[ LIVMapper::sync_packages ] meas.lidar->points.size() <= 1"<<std::endl;
+        return false;
+      } 
 
       meas.lidar_frame_beg_time = lid_header_time_buffer.front();                                                // generate lidar_frame_beg_time
       meas.lidar_frame_end_time = meas.lidar_frame_beg_time + meas.lidar->points.back().curvature / double(1000); // calc lidar scan end time
@@ -961,6 +975,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       // ROS_ERROR("out sync");
 
       // 说明 IMU 数据不足，无法完成前向传播
+      // std::cout<<"[ LIVMapper::sync_packages ] imu last timestamp behind the lidar end timestamp, don't conver the lidar cycle and failed to forward propagation"<<std::endl;
       return false;
     }
 
@@ -1026,7 +1041,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
       {
         img_buffer.pop_front();
         img_time_buffer.pop_front();
-        ROS_ERROR("[ Data Cut ] Throw one image frame! \n");
+        // ROS_ERROR("[ Data Cut ] Throw one image frame! image timestamp behind the lidar\n");
         return false;
       }
 

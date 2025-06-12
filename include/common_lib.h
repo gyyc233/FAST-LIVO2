@@ -231,10 +231,10 @@ struct StatesGroup
   };
 
   friend std::ostream& operator<<(std::ostream& os, const StatesGroup& b){
-    os<<"rot_end: "<<b.rot_end.transpose()<<std::endl;
-    os<<"pos_end: "<<b.pos_end.transpose()<<std::endl;
-    os<<"inv_expo_time: "<<b.inv_expo_time<<std::endl;
-    os<<"vel_end: "<<b.vel_end.transpose()<<std::endl;
+    os<<"\nrot_end:\n"<<b.rot_end.transpose()<<std::endl;
+    os<<"pos_end:\n"<<b.pos_end.transpose()<<std::endl;
+    os<<"inv_expo_time:\n"<<b.inv_expo_time<<std::endl;
+    os<<"vel_end:\n"<<b.vel_end.transpose()<<std::endl;
     // os<<"bias_g: "<<b.bias_g.transpose()<<std::endl;
     // os<<"bias_a: "<<b.bias_a.transpose()<<std::endl;
     // os<<"gravity: "<<b.gravity.transpose()<<std::endl;

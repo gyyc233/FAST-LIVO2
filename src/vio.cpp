@@ -2140,6 +2140,7 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
   printf("\033[1;32m| %-29s | %-27lf |\033[0m\n", "Current Total Time", t7 - t1 - (t5 - t4));
   printf("\033[1;32m| %-29s | %-27lf |\033[0m\n", "Average Total Time", ave_total);
+  printf("\033[1;34m|                         End of handle VIO                    |\033[0m\n");
   printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
 
   // std::string text = std::to_string(int(1 / (t7 - t1 - (t5 - t4)))) + " HZ";

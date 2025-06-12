@@ -391,12 +391,14 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
   body_cov_list_.clear();
   body_cov_list_.reserve(feats_down_size_);
 
+  std::cout<<"[ VoxelMapManager::StateEstimation ] origin state:\n"<<state_<<std::endl;
+
   // build_residual_time = 0.0;
   // ekf_time = 0.0;
   // double t0 = omp_get_wtime();
 
   // 1. 将点转到世界坐标系并计算点的测量协方差与反对称矩阵
-  std::cout<<"[ VoxelMapManager::StateEstimation calculate lidar point body covariance ]"<<std::endl;
+  std::cout<<"[ VoxelMapManager::StateEstimation ] calculate lidar point body covariance"<<std::endl;
   for (size_t i = 0; i < feats_down_body_->size(); i++)
   {
     V3D point_this(feats_down_body_->points[i].x, feats_down_body_->points[i].y, feats_down_body_->points[i].z);
@@ -591,6 +593,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     delta_x_k = solution;
     std::cout<<"[ VoxelMapManager::StateEstimation ] delta x_k: \r\n"<<delta_x_k<<std::endl;
     state_ += solution;
+    std::cout<<"[ VoxelMapManager::StateEstimation ] updated x_k, state:\n"<<state_<<std::endl;
 
     // 提取旋转和平移增量
     auto rot_add = solution.block<3, 1>(0, 0);
@@ -613,12 +616,15 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     {
       /*** Covariance Update ***/
       std::cout<<"[ VoxelMapManager::StateEstimation ] ESIKF update covariance, itertor count: "<<iterCount<<std::endl;
+      // std::cout<<"origin state covariance:\n"<<state_.cov<<std::endl;
       // _state.cov = (I_STATE - G) * _state.cov; TODO: 这里可以看看到G变量的定义
       // P_k+1 = (I - KH)P_k
       state_.cov.block<DIM_STATE, DIM_STATE>(0, 0) =
           (I_STATE.block<DIM_STATE, DIM_STATE>(0, 0) - G.block<DIM_STATE, DIM_STATE>(0, 0)) * state_.cov.block<DIM_STATE, DIM_STATE>(0, 0);
+      // std::cout<<"updated state covariance:\n"<<state_.cov<<std::endl;
       // total_distance += (_state.pos_end - position_last).norm();
       position_last_ = state_.pos_end; // 记录当前位置，用于后续滑动窗口
+      std::cout<<"[ VoxelMapManager::StateEstimation ] state estimate state:\n"<<state_<<std::endl;
       geoQuat_ = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
 
       // VD(DIM_STATE) K_sum  = K.rowwise().sum();
