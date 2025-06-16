@@ -33,7 +33,7 @@ vio:
   patch_size: 8
   patch_pyrimid_level: 4
   normal_en: true
-  raycast_en: false
+  raycast_en: true
   inverse_composition_en: false
   exposure_estimate_en: true
   inv_expo_cov: 0.1

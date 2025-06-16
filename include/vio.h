@@ -104,8 +104,8 @@ public:
   V3D Pcl; // 传感器之间的平移（下标 l:LiDAR; c:Camera; i:imu; w:world）
   V3D Pcw; // 传感器之间的平移（下标 l:LiDAR; c:Camera; i:imu; w:world）
 
-  vector<int> grid_num;
-  vector<int> map_index;
+  vector<int> grid_num; // 视觉图像帧对应的网格id
+  vector<int> map_index; // 保存对应网格id中点云到当前视觉图像帧相机的最短距离
   vector<int> border_flag;
   vector<int> update_flag;
   vector<float> map_dist;

@@ -127,6 +127,7 @@ void VIOManager::initializeVIO()
           // xyz[1] = (v - cy) / fy * d_temp;
           // xyz[2] = d_temp;
           SamplePointsEachGrid.push_back(xyz);
+          // std::cout<<"[ VIOManager::initializeVIO ] raycast_en sample size: "<<xyz.transpose()<<std::endl;
         }
         rays_with_sample_points.push_back(SamplePointsEachGrid);
       }
@@ -413,7 +414,13 @@ double VIOManager::calculateNCC(float *ref_patch, float *cur_patch, int patch_si
 /// @param plane_map lidar 点云体素地图
 void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map)
 {
-  if (feat_map.size() <= 0) return;
+  if (feat_map.size() <= 0) {
+    std::cout<<"[ VIOManager::retrieveFromVisualSparseMap ] feat_map.size()<=0"<<std::endl;
+    return;
+  }
+
+  std::cout<<"[ VIOManager::retrieveFromVisualSparseMap ] start retrieveFromVisualSparseMap()"<<std::endl;
+
   double ts0 = omp_get_wtime();
 
   // pg_down->reserve(feat_map.size());
@@ -463,7 +470,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
     // t_position += omp_get_wtime()-t0;
     // double t1 = omp_get_wtime();
-    // 当前帧视野内涉及的体素列表（临时缓存）
+    // 当前帧视野内涉及的体素列表（临时缓存）进行标记
     auto iter = sub_feat_map.find(position);
     if (iter == sub_feat_map.end()) { sub_feat_map[position] = 0; }
     else { iter->second = 0; }
@@ -476,7 +483,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
     if (pt_c[2] > 0)
     {
-      V2D px;
+      V2D px; // 像素坐标
       // px[0] = fx * pt_c[0]/pt_c[2] + cx;
       // px[1] = fy * pt_c[1]/pt_c[2]+ cy;
       px = new_frame_->cam_->world2cam(pt_c);
@@ -488,7 +495,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         float depth = pt_c[2];
         int col = int(px[0]); // 列
         int row = int(px[1]); // 行
-        it[width * row + col] = depth; // 该像素的深度
+        it[width * row + col] = depth; // 该像素的深度，这里直接用z坐标表示深度而不是距离
       }
     }
     // t_depth += omp_get_wtime()-t2;
@@ -581,9 +588,10 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       // bool add_sample = false;
 
       // 对第i个网格里面的所有深度采样点（相机单位球面坐标）进行遍历
+      // rays_with_sample_points 在initializeVIO()中初始化
       for (const auto &it : rays_with_sample_points[i])
       {
-        V3D sample_point_w = new_frame_->f2w(it); // 转世界坐标
+        V3D sample_point_w = new_frame_->f2w(it); // 转 rays_with_sample_points采样点转世界坐标
         // sample_points_temp.push_back(sample_point_w);
 
         // 获取该点所在体素坐标
@@ -714,16 +722,15 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       // cv::circle(img_cp, cv::Point2f(pc[0], pc[1]), 3, cv::Scalar(0, 0, 255), -1, 8); // Green Sparse Align tracked
 
       V3D pt_cam(new_frame_->w2f(pt->pos_));
-      bool depth_continous = false; // 标记该点是否与局部区域的深度值一致
+      bool depth_continous = false; // 标记该点深度值一致
 
-      // 检查该点周围是否有剧烈的深度跳跃
       for (int u = -patch_size_half; u <= patch_size_half; u++)
       {
         for (int v = -patch_size_half; v <= patch_size_half; v++)
         {
           if (u == 0 && v == 0) continue;
 
-          // 获取pc周围像素的深度
+          // 从之前的深度图获取该点深度
           float depth = it[width * (v + int(pc[1])) + u + int(pc[0])];
 
           if (depth == 0.) continue;
@@ -821,7 +828,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
         V3D norm_vec = (ref_ftr->T_f_w_.rotation_matrix() * pt->normal_).normalized();
         V3D pf(ref_ftr->T_f_w_ * pt->pos_);
         // V3D pf_norm = pf.normalized();
-        
+
         // double cos_theta = norm_vec.dot(pf_norm);
         // if(cos_theta < 0) norm_vec = -norm_vec;
         // if (abs(cos_theta) < 0.08) continue; // 0.5 60 degree 0.34 70 degree 0.17 80 degree 0.08 85 degree
