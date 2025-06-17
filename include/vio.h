@@ -122,7 +122,9 @@ public:
   int length; // 网格总数
   double image_resize_factor;
   double fx, fy, cx, cy;
-  int patch_pyrimid_level, patch_size, patch_size_total, patch_size_half, border, warp_len;
+  int patch_pyrimid_level, patch_size;
+  int patch_size_total; // 每个图像块中包含的像素数
+  int patch_size_half, border, warp_len;
   int max_iterations, total_points;
 
   double img_point_cov, outlier_threshold, ncc_thre;
