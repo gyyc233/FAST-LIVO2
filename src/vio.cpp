@@ -1199,7 +1199,7 @@ void VIOManager::updateReferencePatch(const unordered_map<VOXEL_LOCATION, VoxelO
             // V3D pf_ref(pt->ref_patch->T_f_w_ * pt->pos_);
             // V3D norm_vec_ref(pt->ref_patch->T_f_w_.rotation_matrix() *
             // plane.normal); double cos_ref = pf_ref.dot(norm_vec_ref);
-            
+
             // 检查法向量反向
             if (pt->previous_normal_.dot(plane.normal_) < 0) { pt->normal_ = -plane.normal_; }
             else { pt->normal_ = plane.normal_; }

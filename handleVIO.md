@@ -11,6 +11,7 @@
   - [projectPatchFromRefToCur 可视化当前帧与参考帧之间的图像块匹配结果（如光度误差、法向量投影等）](#projectpatchfromreftocur-可视化当前帧与参考帧之间的图像块匹配结果如光度误差法向量投影等)
   - [updateVisualMapPoints(cv::Mat img) 为视觉特征点添加新的图像观测帧信息](#updatevisualmappointscvmat-img-为视觉特征点添加新的图像观测帧信息)
   - [updateReferencePatch 检查视觉点是否收敛, 为每个视觉特征点更新其参考帧](#updatereferencepatch-检查视觉点是否收敛-为每个视觉特征点更新其参考帧)
+  - [dumpDataForColmap() 保存colmap文件](#dumpdataforcolmap-保存colmap文件)
 
 
 # handleVIO
@@ -236,4 +237,17 @@ jacobian矩阵只计算一次并没有伴随迭代更新计算
 
 ## updateReferencePatch 检查视觉点是否收敛, 为每个视觉特征点更新其参考帧
 
-TODO:
+`updateReferencePatch(feat_map),feat_map在函数替换为plane_map` 对视觉子地图中的所有视觉特征点`visual_submap->voxel_points`作以下处理
+
+1. 对视觉特征点`VisualPoint *pt = visual_submap->voxel_points[i]`计算其空间体素位置并在`plane_map`中搜索最靠近`pt`的八叉树叶子节点`VoxelOctoTree *current_octo`
+2. 若该节点具有平面模型，计算视觉特征点`pt`到该平面距离和`pt`到点云平面中心的距离平方，计算该点投影该点到平面上的距离`range_dis`，如果`range_dis<=3 * plane.radius_`
+   1. 视觉点与平面模型不确定度(协方差)建模`sigma_l`
+   2. 若视觉特征点`pt`到该平面距离`dis_to_plane_abs`小于`3 * sqrt(sigma_l)`
+   3. 若法向量前后变化小且观测帧数量大于10则认为该视觉特征点已经收敛`pt->is_converged_ = true`
+3. 对该视觉特征点`pt`所有的观测帧两两比较
+   1. 获取`pt`在观测帧视角1下的图像块`ref_patch_temp`，并计算`pt`在观测帧视角1下的方向向量和法向量，然后计算该点图像块附近的平均灰度值`ref_mean`
+   2. 计算视觉点`pt`在观测帧视角2下图像块`patch_cache`区域的灰度均值`other_mean`
+   3. 计算这两个图像块之间的NCC,兼顾视角1下方向向量和法向量的夹角cos构造最终评分,那么这个评分兼顾光度一致性和几何一致性,作为视角1的评分
+   4. 按照最高评分更新该视觉点的参考图像块`pt->ref_patch = ref_patch_temp`
+
+## dumpDataForColmap() 保存colmap文件
