@@ -16,8 +16,10 @@ LIVO2 主流程
 1. 从 ROS 参数服务器中读取一系列配置参数
 2. LIVMapper::initializeComponents() 初始化 `vio_manager`
    1. 设置系统外参 `VIOManagerPtr vio_manager->setImuToLidarExtrinsic(extT, extR); // imu to lidar` `vio_manager->setLidarToCameraExtrinsic(cameraextrinR, cameraextrinT); // lidar to camera`
-   2. `VIOManager::initializeVIO()`: 实例化 `visual_submap`, 加载针孔相机内参，图像尺寸，计算camera到imu的外参,图像网格初始化
-      1. `raycast_en` 对于图像中的每一个网格，在其中心像素处沿视线方向（即相机光轴方向）生成一系列深度采样点 `rays_with_sample_points`
+   2. `VIOManager::initializeVIO()`: 实例化 `visual_submap`, 加载针孔相机内参，图像尺寸，计算camera到imu的外参
+      1. 计算`Jdphi_dR`so3对旋转矩阵的偏导, `Jdp_dR` 平移向量对旋转矩阵的偏导
+      2. 图像网格属性初始化，每行/列有多少grid
+      3. `raycast_en` 对于图像中的每一个网格，在其中心像素处沿视线方向（即相机光轴方向）生成一系列深度采样点 `rays_with_sample_points`
    3. `ImuProcessPtr p_imu` 初始化 p_imu
 
 ## LIVMapper 最外层接口执行
@@ -26,7 +28,7 @@ LIVO2 主流程
    1. lidar 点云回调
       1. [点云预处理](#点云预处理) `PreprocessPtr p_pre->process(msg, ptr);`, save to `lid_raw_data_buffer`
    2. imu 回调
-      1. 检查imu与lidar时间对齐,ros_driver_fix_en强制硬同步，保存在 `imu_buffer`, `prop_imu_buffer`
+      1. 检查imu与lidar时间对齐,ros_driver_fix_en 强制硬同步，保存在 `imu_buffer`, `prop_imu_buffer`
    3. image 回调，缓存至 `img_buffer`
    4. 定时器 imu_prop_callback：
       1. 等待imu初始化，完成一次ekf位姿估计

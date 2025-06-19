@@ -63,10 +63,10 @@ void VIOManager::initializeVIO()
 
   V3D Pic;
   M3D tmp;
-  Jdphi_dR = Rci;
+  Jdphi_dR = Rci; // 对旋转矩阵 Rci 的偏导数 Jdphi_dR 等于 Rci 本身，在右扰动模型中，旋转矩阵的导数为其自身。
   Pic = -Rci.transpose() * Pci;
   tmp << SKEW_SYM_MATRX(Pic);
-  // 向量对旋转Rci求偏导，右扰动更新
+  // 计算平移向量 Pci 对旋转矩阵 Rci 的偏导数 Jdp_dR
   Jdp_dR = -Rci * tmp;
 
   // grid_size 由配置文件给定
