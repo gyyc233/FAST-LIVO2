@@ -17,7 +17,7 @@ LIVO2 主流程
 2. LIVMapper::initializeComponents() 初始化 `vio_manager`
    1. 设置系统外参 `VIOManagerPtr vio_manager->setImuToLidarExtrinsic(extT, extR); // imu to lidar` `vio_manager->setLidarToCameraExtrinsic(cameraextrinR, cameraextrinT); // lidar to camera`
    2. `VIOManager::initializeVIO()`: 实例化 `visual_submap`, 加载针孔相机内参，图像尺寸，计算camera到imu的外参
-      1. 计算`Jdphi_dR`so3对旋转矩阵的偏导, `Jdp_dR` 平移向量对旋转矩阵的偏导
+      1. 计算`Jdphi_dR`se3对旋转矩阵的偏导, `Jdp_dR` se3 平移向量对旋转矩阵的偏导(右扰动)
       2. 图像网格属性初始化，每行/列有多少grid
       3. `raycast_en` 对于图像中的每一个网格，在其中心像素处沿视线方向（即相机光轴方向）生成一系列深度采样点 `rays_with_sample_points`
    3. `ImuProcessPtr p_imu` 初始化 p_imu
@@ -31,13 +31,13 @@ LIVO2 主流程
       1. 检查imu与lidar时间对齐,ros_driver_fix_en 强制硬同步，保存在 `imu_buffer`, `prop_imu_buffer`
    3. image 回调，缓存至 `img_buffer`
    4. 定时器 imu_prop_callback：
-      1. 等待imu初始化，完成一次ekf位姿估计
+      1. 等待imu初始化，完成一次ekf位姿估计 `prop_imu_once(imu_propagate, dt, acc_imu, omg_imu)` 
       2. 若state_update_flg（该标志在handleVIO handleLIO 中使能），基于prop_imu_buffer 数据，进行[imu前向传播](#imu-单次状态更新) `prop_imu_once(imu_propagate, dt, acc_imu, omg_imu)`，否则只对newest_imu进行传播，更新imu
       3. 提取更新后的imu_propagate发布到 `/LIVO2/imu_propagate`
 2. LIVMapper::run() 
    1. `sync_packages()`，组装数据到`LidarMeasureGroup &meas`->`LidarMeasures`
       1. ONLY_LIO：同步lidar点云与imu数据, 组装数据`MeasureGroup m` 到 `LidarMeasureGroup &meas`,meas.lio_vio_flg = LIO; 
-      2. LIVO,该模式下，LIO比VIO优先
+      2. LIVO,该模式下，LIO比VIO优先,它们顺序更新，LIO构建几何结构，VIO进行着色与补点
          1. VIO，组装lidar点云与imu数据，后`meas.lio_vio_flg = LIO;`，进入LIO分支
          2. LIO，组装图像帧数据，后`meas.lio_vio_flg = VIO;`，进入VIO分支
       3. ONLY_LO，仅使用lidar数据
