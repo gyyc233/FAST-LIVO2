@@ -37,7 +37,7 @@ LIVO2 主流程
 2. LIVMapper::run() 
    1. `sync_packages()`，组装数据到`LidarMeasureGroup &meas`->`LidarMeasures`
       1. ONLY_LIO：同步lidar点云与imu数据, 组装数据`MeasureGroup m` 到 `LidarMeasureGroup &meas`,meas.lio_vio_flg = LIO; 
-      2. LIVO,该模式下，LIO比VIO优先,它们顺序更新，LIO构建几何结构，VIO进行着色与补点
+      2. LIVO,该模式下，LIO比VIO优先,它们顺序更新，LIO构建体素点云地图与几何结构，VIO进行着色与补点
          1. VIO，组装lidar点云与imu数据，后`meas.lio_vio_flg = LIO;`，进入LIO分支
          2. LIO，组装图像帧数据，后`meas.lio_vio_flg = VIO;`，进入VIO分支
       3. ONLY_LO，仅使用lidar数据
@@ -51,7 +51,7 @@ LIVO2 主流程
       3. 将前向传播，后向传播的结果（状态向量与去畸变点云）保存到 `voxelmap_manager->state_ = _state;voxelmap_manager->feats_undistort_ = feats_undistort;`
    4. `LIVMapper::stateEstimationAndMapping() ` 基于`LidarMeasures.lio_vio_flg`执行LIO或者VIO流程
       1. [VIO->`LIVMapper::handleVIO()`](./handleVIO.md)
-         1. VIO 需要等待 `pcl_w_wait_pub` 数据，它在handleLIO中添加数据
+         1. VIO 需要等待 `pcl_w_wait_pub` 数据，它在handleLIO中添加数据，所以会先执行LIO
          2. `VIOManager::processFrame` VIO主要流程
       2. [LIO and LO->`LIVMapper::handleLIO()`](./handleLIO.md)
          1. lidar点云转世界坐标系 `voxelmap_manager->feats_down_world_`
@@ -77,7 +77,7 @@ LIVO2 主流程
 
 1. 加计归一化并减去bias,陀螺仪减去bias,旋转姿态右乘更新
 2. 加速度转到世界坐标系再加上重力分量
-3. 更新imu传播状态`StatesGroup`
+3. 使用离散时间imu积分模型，更新imu传播状态`StatesGroup`
 
 ## imu 初始化
 

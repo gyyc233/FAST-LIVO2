@@ -430,6 +430,7 @@ void LIVMapper::handleLIO()
   }
   
   euler_cur = RotMtoEuler(_state.rot_end);
+  // TODO: (检查欧拉角顺序)从欧拉角创建四元数
   geoQuat = tf::createQuaternionMsgFromRollPitchYaw(euler_cur(0), euler_cur(1), euler_cur(2));
   publish_odometry(pubOdomAftMapped);
 
@@ -453,6 +454,8 @@ void LIVMapper::handleLIO()
   // 使用更新后的点云和协方差更新体素地图
   voxelmap_manager->UpdateVoxelMap(voxelmap_manager->pv_list_);
   std::cout << "[ LIO ] Update lidar Voxel Map" << std::endl;
+
+  // _pv_list 将用于handleVIO
   _pv_list = voxelmap_manager->pv_list_;
   
   double t4 = omp_get_wtime();
@@ -476,6 +479,8 @@ void LIVMapper::handleLIO()
   {
     RGBpointBodyToWorld(&laserCloudFullRes->points[i], &laserCloudWorld->points[i]);
   }
+
+  // pcl_w_wait_pub将用于`handleVIO`
   *pcl_w_wait_pub = *laserCloudWorld;
 
   if (!img_en) publish_frame_world(pubLaserCloudFullRes, vio_manager);
@@ -601,11 +606,12 @@ void LIVMapper::prop_imu_once(StatesGroup &imu_prop_state, const double dt, V3D 
   angvel_avr -= imu_prop_state.bias_g;
 
   // 更新旋转
-  M3D Exp_f = Exp(angvel_avr, dt);
+  M3D Exp_f = Exp(angvel_avr, dt); // 旋转向量指数映射为旋转矩阵
   /* propogation of IMU attitude */
-  imu_prop_state.rot_end = imu_prop_state.rot_end * Exp_f;
+  imu_prop_state.rot_end = imu_prop_state.rot_end * Exp_f; // 右乘
 
-  /* Specific acceleration (global frame) of IMU J加速度转到世界坐标系再加上重力*/
+  // 离散时间imu积分模型
+  /* Specific acceleration (global frame) of IMU 线加速度转到世界坐标系再加上重力*/
   V3D acc_imu = imu_prop_state.rot_end * acc_avr + V3D(imu_prop_state.gravity[0], imu_prop_state.gravity[1], imu_prop_state.gravity[2]);
 
   /* propogation of IMU 更新imu位置 */
@@ -955,16 +961,17 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
     if (!lidar_pushed)
     {
       // If not push the lidar into measurement data buffer
+      // lidar data push to mea 
       meas.lidar = lid_raw_data_buffer.front(); // push the first lidar topic
       if (meas.lidar->points.size() <= 1){
         // std::cout<<"[ LIVMapper::sync_packages ] meas.lidar->points.size() <= 1"<<std::endl;
         return false;
       } 
 
-      meas.lidar_frame_beg_time = lid_header_time_buffer.front();                                                // generate lidar_frame_beg_time
+      meas.lidar_frame_beg_time = lid_header_time_buffer.front();　// generate lidar_frame_beg_time
       meas.lidar_frame_end_time = meas.lidar_frame_beg_time + meas.lidar->points.back().curvature / double(1000); // calc lidar scan end time
       meas.pcl_proc_cur = meas.lidar;
-      lidar_pushed = true;                                                                                       // flag
+      lidar_pushed = true;  // flag
     }
 
     // 检查 IMU 是否覆盖整个 LiDAR 扫描周期
@@ -987,7 +994,9 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
     mtx_buffer.lock();
     while (!imu_buffer.empty())
     {
+      // imu时间晚于lidar scan则结束
       if (imu_buffer.front()->header.stamp.toSec() > meas.lidar_frame_end_time) break;
+
       m.imu.push_back(imu_buffer.front());
       imu_buffer.pop_front();
     }
@@ -1013,6 +1022,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
   {
     /*** For LIVO mode, the time of LIO update is set to be the same as VIO, LIO
      * first than VIO imediatly LIO比VIO优先 ***/
+    // LIO VIO 按时间顺序执行，LIO 构建点云体素地图，提供几何信息,VIO执行图像对齐
     EKF_STATE last_lio_vio_flg = meas.lio_vio_flg;
     // double t0 = omp_get_wtime();
     switch (last_lio_vio_flg)
@@ -1044,7 +1054,6 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
         // ROS_ERROR("[ Data Cut ] Throw one image frame! image timestamp behind the lidar\n");
         return false;
       }
-
 
       // 若图像帧晚于最新lidar扫描时间或者晚于imu时间则无效
       if (img_capture_time > lid_newest_time || img_capture_time > imu_newest_time)

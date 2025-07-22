@@ -33,7 +33,7 @@ template <typename T> Eigen::Matrix<T, 3, 3> Exp(const Eigen::Matrix<T, 3, 1> &&
 /// @return 经过 dt 秒后由该角速度产生的旋转矩阵
 template <typename T, typename Ts> Eigen::Matrix<T, 3, 3> Exp(const Eigen::Matrix<T, 3, 1> &ang_vel, const Ts &dt)
 {
-  T ang_vel_norm = ang_vel.norm();
+  T ang_vel_norm = ang_vel.norm(); // 模长表示角速度
   Eigen::Matrix<T, 3, 3> Eye3 = Eigen::Matrix<T, 3, 3>::Identity();
 
   if (ang_vel_norm > 0.0000001)
@@ -43,7 +43,7 @@ template <typename T, typename Ts> Eigen::Matrix<T, 3, 3> Exp(const Eigen::Matri
 
     K << SKEW_SYM_MATRX(r_axis);
 
-    T r_ang = ang_vel_norm * dt;
+    T r_ang = ang_vel_norm * dt; // 角速度乘时间
 
     /// Roderigous Tranformation
     return Eye3 + std::sin(r_ang) * K + (1.0 - std::cos(r_ang)) * K * K;

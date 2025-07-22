@@ -353,7 +353,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
   switch (lidar_meas.lio_vio_flg)
   {
   case LIO:
-  case VIO:
+  case VIO: // 外部在 sync_packages 中的LIVO--LIO分支中 lio_vio_flg 改为了VIO
     dt = 0;
     for (int i = 0; i < v_imu.size() - 1; i++)
     {

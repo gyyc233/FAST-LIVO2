@@ -170,7 +170,7 @@ void VoxelOctoTree::init_octo_tree()
     {
       octo_state_ = 0; // 当前节点是平面节点
       // new added
-      // 如果点数超过了最大允许点数 max_points_num_ 则紧枝后续更新
+      // 如果点数超过了最大允许点数 max_points_num_ 则终止该平面的后续更新
       if (temp_points_.size() > max_points_num_)
       {
         update_enable_ = false;
@@ -687,7 +687,7 @@ void VoxelMapManager::BuildVoxelMap()
     M3D point_crossmat;
     point_crossmat << SKEW_SYM_MATRX(point_this);
 
-    // (state_.rot_end * extR_) * var * (state_.rot_end * extR_).transpose() 通过旋转矩阵将原始协方差变换到世界坐标系
+    // (state_.rot_end * extR_) * var * (state_.rot_end * extR_).transpose() 通过旋转矩阵将原始协方差变换到世界坐标系(协方差线性变换)
     // (-point_crossmat) * state_.cov.block<3, 3>(0, 0) * (-point_crossmat).transpose()：考虑了由于方向估计误差导致的协方差变化
     // state_.cov.block<3, 3>(3, 3)：加上状态估计中的平移部分带来的协方差
     var = (state_.rot_end * extR_) * var * (state_.rot_end * extR_).transpose() +

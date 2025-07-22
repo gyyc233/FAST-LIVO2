@@ -61,6 +61,7 @@ public:
   bool sync_packages(LidarMeasureGroup &meas);
   
   // 单次imu状态传播
+  // imu_prop_state: imu 状态量; dt: 采样时间; acc_avr: 线加速度; angvel_avr: 角加速度
   void prop_imu_once(StatesGroup &imu_prop_state, const double dt, V3D acc_avr, V3D angvel_avr);
 
   // 定时触发 IMU 状态传播，在系统状态更新后，IMU 数据对当前状态进行连续预测，为后续 LiDAR 处理提供先验位姿估计

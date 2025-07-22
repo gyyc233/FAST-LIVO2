@@ -1,7 +1,7 @@
 - [handleLIO](#handlelio)
   - [前置步骤](#前置步骤)
   - [LIO主要流程](#lio主要流程)
-    - [lidar降采样与体素地图创建](#lidar降采样与体素地图创建)
+    - [lidar降采样与体素地图创建，构造八叉树地图](#lidar降采样与体素地图创建构造八叉树地图)
     - [基于ESIKF的状态估计](#基于esikf的状态估计)
     - [对新lidar点云更新体素地图`voxel_map_`](#对新lidar点云更新体素地图voxel_map_)
     - [体素点云滑窗](#体素点云滑窗)
@@ -24,16 +24,18 @@
 
 ## LIO主要流程
 
-### lidar降采样与体素地图创建
+### lidar降采样与体素地图创建，构造八叉树地图
 
 1. 对去畸变后的lidar点云做降采样，copy为lidar body坐标系系点云与世界坐标系点云到`voxelmap_manager->feats_down_body_` `voxelmap_manager->feats_down_world_`
 2. (若是首次创建)初始化lidar点云体素地图`voxelmap_manager->BuildVoxelMap()`
    1. lidar body系下点云不确定性计算（每个点协方差矩阵计算）(测距不确定性+方位不确定性)
    2. world坐标系下点的协方差计算: 将body协方差从lidar坐标系转到imu, 在加上state状态估计的协方差，构成点的总协方差(`Efficient and Probabilistic Adaptive Voxel Mapping for Accurate`)
    3. 根据voxel_size计算每个点的体素id并建立八叉树体素地图`voxel_map_`
-      1. 对体素点云进行平面模型估计`init_plane(temp_points_, plane_ptr_)`
+      1. 对体素点云进行平面模型估计，通过`init_octo_tree()`调用`init_plane(temp_points_, plane_ptr_)`
 
 ### 基于ESIKF的状态估计
+
+`void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)`
 
 1. 体素地图初始完后，后面新来的lidar点需要重新进行body协方差计算
 2. 进入迭代误差卡尔曼流程
