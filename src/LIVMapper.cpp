@@ -296,13 +296,13 @@ void LIVMapper::handleVIO()
   fout_pre << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
             << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose() << " "
             << _state.bias_a.transpose() << " " << V3D(_state.inv_expo_time, 0, 0).transpose() << std::endl;
-    
+
   if (pcl_w_wait_pub->empty() || (pcl_w_wait_pub == nullptr)) 
   {
     std::cout << "[ VIO ] No point!!!" << std::endl;
     return;
   }
-    
+
   // 当前帧lidar点数量
   std::cout << "[ VIO ] Raw feature num: " << pcl_w_wait_pub->points.size() << std::endl;
 

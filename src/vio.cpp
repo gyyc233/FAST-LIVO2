@@ -2097,7 +2097,7 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
 
   double t1 = omp_get_wtime();
 
-  // 2. 生成视觉地图
+  // 2. 生成视觉稀疏地图
   retrieveFromVisualSparseMap(img, pg, feat_map);
 
   double t2 = omp_get_wtime();

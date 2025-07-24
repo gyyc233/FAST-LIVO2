@@ -54,7 +54,7 @@
 
 ### 对新lidar点云更新体素地图`voxel_map_`
 
-- `UpdateVoxelMap` 将新点添加到体素地图中 `void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)`
+- `UpdateVoxelMap` 将新增点添加到体素地图中 `void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)`
 - `_pv_list = voxelmap_manager->pv_list_`,`_pv_list` 将用于handleVIO
 
 ### 体素点云滑窗
