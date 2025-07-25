@@ -67,6 +67,7 @@ bool VisualPoint::getCloseViewObs(const Vector3d &framepos, Feature *&ftr, const
   // 对每个观测特征，获取其对应帧的相机中心位置，计算地图点看向该帧的方向向量
   for (auto it = obs_.begin(), ite = obs_.end(); it != ite; ++it)
   {
+    // 将 pos_ 转到该相机帧下
     Eigen::Vector3d dir((*it)->T_f_w_.inverse().translation() - pos_);
     dir.normalize();
 

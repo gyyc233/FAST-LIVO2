@@ -225,7 +225,7 @@ void VIOManager::getImagePatch(cv::Mat img, V2D pc, float *patch_tmp, int level)
 {
   const float u_ref = pc[0];
   const float v_ref = pc[1];
-  const int scale = (1 << level);
+  const int scale = (1 << level); // 1向左移位，表示乘
 
   // 将图像块中心点 pc 的坐标转换为当前金字塔层级下的整数部分和小数部分 亚像素精度
   // 通过计算周围四个像素点的权重，并进行加权求和来获得目标位置的像素值
@@ -255,12 +255,12 @@ void VIOManager::getImagePatch(cv::Mat img, V2D pc, float *patch_tmp, int level)
 
 void VIOManager::insertPointIntoVoxelMap(VisualPoint *pt_new)
 {
-  V3D pt_w(pt_new->pos_[0], pt_new->pos_[1], pt_new->pos_[2]); // 视觉点在世界坐标系下的坐标
+  V3D pt_w(pt_new->pos_[0], pt_new->pos_[1], pt_new->pos_[2]); // VisualPoint 中对应lidar点的世界坐标
   double voxel_size = 0.5; // 每个体素（voxel）的大小为 0.5 单位长度
   float loc_xyz[3]; // 对应体素坐标
   for (int j = 0; j < 3; j++)
   {
-    // 将点的世界坐标除以 voxel_size，得到它在该维度上的体素索引
+    // 将点的世界坐标除以 voxel_size，得到它在点云体素地图对应维度上的体素索引
     loc_xyz[j] = pt_w[j] / voxel_size;
     if (loc_xyz[j] < 0) { loc_xyz[j] -= 1.0; }
   }
@@ -473,7 +473,10 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
     // double t1 = omp_get_wtime();
     // 当前帧视野内涉及的体素列表（临时缓存）进行标记
     auto iter = sub_feat_map.find(position);
-    if (iter == sub_feat_map.end()) { sub_feat_map[position] = 0; }
+    if (iter == sub_feat_map.end()) { 
+      // 标记了每个lidar点的点云体素地图索引
+      sub_feat_map[position] = 0; 
+    }
     else { iter->second = 0; }
 
     // t_insert += omp_get_wtime()-t1;
@@ -571,6 +574,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
   // 对于没有地图点的网格，使用之前生成的采样点（rays_with_sample_points）进行光线投射，查找这些采样点是否落在 plane_map（来自 LiDAR 平面分割）中的平面上
   // 如果有有效平面，则将这些候选点加入 visual_submap->add_from_voxel_map
   // TODO: RayCasting Module 光线投射
+  // 这里依赖 raycast_en 标志位，但是示例的 raycast_en 都是false
   if (raycast_en)
   {
     for (int i = 0; i < length; i++)
@@ -592,7 +596,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       // rays_with_sample_points 在initializeVIO()中初始化
       for (const auto &it : rays_with_sample_points[i])
       {
-        V3D sample_point_w = new_frame_->f2w(it); // 转 rays_with_sample_points采样点转世界坐标
+        V3D sample_point_w = new_frame_->f2w(it); // 转 rays_with_sample_points采样点转世界坐标(归一化坐标转到世界坐标系)
         // sample_points_temp.push_back(sample_point_w);
 
         // 获取该点所在体素坐标
@@ -987,6 +991,10 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
     }
   }
 
+  if(visual_submap->add_from_voxel_map.empty()){
+    printf("[ VIO ] visual_submap->add_from_voxel_map.empty()");
+  }
+
   // 2. 从视觉子图 visual_submap 中筛选出具有高角点响应值的点，并将其加入到视觉地图中
   // 这些点通常是由光线投射 Raycasting 模块生成的候选特征点
   for (int j = 0; j < visual_submap->add_from_voxel_map.size(); j++)
@@ -1022,31 +1030,38 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
     // 表示之前筛选出一个潜在的高质量角点（来自激光雷达或 Raycasting）
     if (grid_num[i] == TYPE_POINTCLOUD) // && (scan_value[i]>=50))
     {
-      pointWithVar pt_var = append_voxel_points[i];
-      V3D pt = pt_var.point_w;
+      pointWithVar pt_var = append_voxel_points[i]; // 该网格对应高质量图像角点对应的lidar点
+      V3D pt = pt_var.point_w; // 角点像素对应lidar点
 
-      // 将候选点转到当前帧相机坐标系下表示
+      // 将候选点yu它的法向量转到当前帧相机坐标系下表示
       V3D norm_vec(new_frame_->T_f_w_.rotation_matrix() * pt_var.normal);
       V3D dir(new_frame_->T_f_w_ * pt);
-      dir.normalize();
+      dir.normalize(); // 3d点转到当前相机帧，然后归一化
       // 方向向量与法向量的夹角余弦
       double cos_theta = dir.dot(norm_vec);
       // if(std::fabs(cos_theta)<0.34) continue; // 70 degree
-      V2D pc(new_frame_->w2c(pt));
+      V2D pc(new_frame_->w2c(pt)); // 对3d点计算其像素，emm...
 
       float *patch = new float[patch_size_total];
       // 提取以像素坐标 pc 为中心的图像块 patch，采用双线性插值方法处理亚像素精度
       getImagePatch(img, pc, patch, 0);
 
-      VisualPoint *pt_new = new VisualPoint(pt); // 创建新视觉点对象
-      Vector3d f = cam->cam2world(pc); // pc 的单位方向向量
-      // ftr_new 是该点在当前帧中的观测特征
+      VisualPoint *pt_new = new VisualPoint(pt); // 基于lidar点创建新视觉点对象
+      Vector3d f = cam->cam2world(pc); // pc 转到相机帧中的3d坐标
+      // pt_new VisualPoint
+      // patch ptlidar点（对应像素）邻域的图像块
+      // pc 对应2d像素
+      // f pc 转到相机帧中的3d坐标，也表示方向向量
+      // new_frame_->T_f_w_ 相机帧在世界坐标系中的坐标
+
+      // 将以上这些作为 ftr_new 是该点在当前帧中的观测特征
       Feature *ftr_new = new Feature(pt_new, patch, pc, f, new_frame_->T_f_w_, 0);
 
       ftr_new->img_ = img;
       ftr_new->id_ = new_frame_->id_;
       ftr_new->inv_expo_time_ = state->inv_expo_time;
 
+      // 将 Feature 加入到该 pt点的参考帧中
       pt_new->addFrameRef(ftr_new);
       pt_new->covariance_ = pt_var.var;
       pt_new->is_normal_initialized_ = true;
