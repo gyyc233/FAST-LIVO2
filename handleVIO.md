@@ -13,6 +13,8 @@
   - [updateVisualMapPoints(cv::Mat img) 为视觉特征点添加新的图像观测帧信息](#updatevisualmappointscvmat-img-为视觉特征点添加新的图像观测帧信息)
   - [updateReferencePatch 检查视觉点是否收敛, 为每个视觉特征点更新其参考帧](#updatereferencepatch-检查视觉点是否收敛-为每个视觉特征点更新其参考帧)
   - [dumpDataForColmap() 保存colmap文件](#dumpdataforcolmap-保存colmap文件)
+- [processFrame 结束后](#processframe-结束后)
+- [NEXT TODO:](#next-todo)
 
 
 # handleVIO
@@ -45,7 +47,7 @@ void VIOManager::updateFrameState(StatesGroup state)
 
 ## `retrieveFromVisualSparseMap` 为视觉特征点寻找参考图像块，计算当前视觉帧与参考视觉帧的仿射变换，对图像块应用仿射变换
 
-函数`retrieveFromVisualSparseMap`基于当前处理逻辑点云帧（经时间对齐在原始点云帧基础上处理过的点云集合）中的点云集合信息动态提取当前帧可见的特征点，并构建高质量的局部子地图(visual_submap)，其中稀疏地图中的可视点会基于点的多个观测，选择最优的patch参考（不同点可能会选择不同的参考图像帧），并根据姿态变换对图像做出对应的放射变换以便后续的光度残差的计算，ESKF基于子地图的可视点的观测状态（光度残差）和IMU的位姿误差运动方程紧耦合优化位姿
+函数`retrieveFromVisualSparseMap`基于当前处理逻辑点云帧（经时间对齐在原始点云帧基础上处理过的点云集合）中的点云集合信息动态提取当前图像帧可见的特征点，并构建高质量的局部子地图(visual_submap)，其中稀疏地图中的可视点会基于点的多个观测，选择最优的patch参考（不同点可能会选择不同的参考图像帧），并根据姿态变换对图像做出对应的放射变换以便后续的光度残差的计算，ESKF基于子地图的可视点的观测状态（光度残差）和IMU的位姿误差运动方程紧耦合优化位姿
 
 ```cpp
 /// @brief 从稀疏视觉地图中检索当前帧可见的点
@@ -86,6 +88,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
    7. 计算仿射变换后的图像块与当前帧图像块的归一化互相关NCC
    8. 保存数据到`visual_submap`，保存了哪些lidar点能用于视觉图像对齐的信息
    9. 遍历完所有网格后更新所有3d点数量`total_points = visual_submap->voxel_points.size();`
+   10. 对所有网格执行以上操作后,`visual_submap->voxel_points`与`total_points`生效
 
 ```cpp
    visual_submap->voxel_points.push_back(pt); // 将当前特征点 pt 加入到 visual_submap 的体素点列表中，表示这个点被成功追踪并用于建图
@@ -119,14 +122,14 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 ```
 
 2. 采用openMP对以下过程加速,计算整体jacobian矩阵 H_sub
-   1. 基于state将视觉特征点转换到当前图像帧相机下并计算其像素坐标`V3D pf = Rcw * pt->pos_ + Pcw; V2D pc = cam->world2cam(pf); // 计算其像素坐标`
+   1. **基于state将视觉特征点转换到当前图像帧相机**下并计算其像素坐标`V3D pf = Rcw * pt->pos_ + Pcw; V2D pc = cam->world2cam(pf); // 计算其像素坐标`
    2. 计算像素坐标对相机坐标的jacobian`computeProjectionJacobian` `Jdpi`
    3. 用双线性插值计算pc周围的像素梯度`du,dv`, 乘以逆曝光参数与缩放，得到归一化像素梯度`Jimg`
    4. 计算LK光流重投影模型jacobian`Jdphi` `Jdphi = Jimg * Jdpi * p_hat` 与对相机坐标的jacobian`Jdp = -Jimg * Jdpi;`
    5. 从投影空间转到imu空间`JdR = Jdphi * Jdphi_dR + Jdp * Jdp_dR; // 对旋转求偏导` `Jdt = Jdp * Jdp_dt; // 对平移求偏导` 用右乘扰动模型
    6. 在同一个图像块中计算每个像素的光度残差`res` (双线性插值加权后的像素值-仿射变换对齐的图像块像素值)
    7. 保存整体 H_sub jacobian矩阵`H_sub<<JdR, Jdt, cur_value`
-3. 执行ESIKF流程，更新卡尔曼增益与state，检查光度残差的递减性`error`
+3. 执行ESIKF流程，**更新卡尔曼增益与state**，检查光度残差的递减性`error`
 
 可以注意到, 在以上LK光流中，每次迭代都是在当前帧新坐标点附近更新，需要重新计算jacobian和Hessian矩阵,为了提高计算效率，引入逆向光流
 
@@ -232,7 +235,7 @@ Feature 关联`Feature *ftr_new = new Feature(pt_new, patch, pc, f, new_frame_->
 
 ## plotTrackedPoints 绘制视觉子地图中的视觉特征点
 
-优化后的残差小于原残差，对应视觉特征点显示为绿色，否则为蓝色
+对于视觉子地图特征点`visual_submap->voxel_points[i]->pos_`, 变换到当前帧图像上的像素坐标，对于优化后的残差小于原残差，对应视觉特征点显示为绿色，否则为蓝色
 
 ## projectPatchFromRefToCur 可视化当前帧与参考帧之间的图像块匹配结果（如光度误差、法向量投影等）
 
@@ -244,7 +247,7 @@ Feature 关联`Feature *ftr_new = new Feature(pt_new, patch, pc, f, new_frame_->
 
 对视觉子地图中的所有视觉特征点`visual_submap->voxel_points`作以下处理
 
-1. 若该视觉特征点`pt`没有收敛则执行`pt->deleteNonRefPatchFeatures()`只保留该点的参考观测帧信息`ref_patch`, 否则跳过
+1. 若该视觉特征点`pt`收敛, 则执行`pt->deleteNonRefPatchFeatures()`只保留该点的参考观测帧信息`ref_patch`, 否则跳过
 2. 提取该点在当前图像帧`img`中的像素坐标 `pc`, 提取该点在当前帧中的图像块 `patch_temp`
 3. 比较该视觉点上一帧观测与当前帧观测的位姿偏移 `delta_pose`
 4. 如果相机移动较大或该点在图像上的运动超过一定阈值（如 40 像素）则标记为需更新 `add_flag = true`
@@ -284,3 +287,25 @@ Feature 关联`Feature *ftr_new = new Feature(pt_new, patch, pc, f, new_frame_->
    4. 按照最高评分更新该视觉点的参考图像块`pt->ref_patch = ref_patch_temp`
 
 ## dumpDataForColmap() 保存colmap文件
+
+- 保存相机外参，图像，编号
+
+# processFrame 结束后
+
+发布点云数据
+
+- `publish_frame_world` 需要`pcl_w_wait_pub`不为空,将`pcl_w_wait_pub`点加入`pcl_wait_pub`,将`pcl_wait_pub`点转到当前图像帧归一化坐标，判断深度是否合理，然后转为像素，判断是否在图像边界内
+- 通过3d点`pcl_wait_pub->points`转像素`pc`,对`pc`做双线性插值，计算亚像素`pixel`，赋予其rgb颜色
+- `pcl::toROSMsg`pcl转ros消息`laserCloudmsg`,发布`pubLaserCloudFullRes.publish(laserCloudmsg)`
+
+发布图像`publish_img_rgb`
+
+```cpp
+pubImage.publish(out_msg.toImageMsg());
+```
+
+# NEXT TODO:
+
+1. 在没有VIO时,直接使用lio的结果建立彩色点云，对比VIO对点云质量的提升
+2. VIO的实际意义还是没有完全理解，需要再次梳理
+3. 基于livo2的colmap结果,做3dgs,对3dgs渲染结果和livo2进行对比

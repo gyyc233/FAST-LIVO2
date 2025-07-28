@@ -952,6 +952,8 @@ void VIOManager::computeJacobianAndUpdateEKF(cv::Mat img)
   // 利用迭代卡尔曼增益 G 对状态协方差矩阵进行修正，从而减小不确定性
   // P=(I-KH)P
   state->cov -= G * state->cov;
+
+  // 通过矫正后的 imu-world 来更新 camera-world 变换关系
   updateFrameState(*state);
 }
 
@@ -992,7 +994,7 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
   }
 
   if(visual_submap->add_from_voxel_map.empty()){
-    printf("[ VIO ] visual_submap->add_from_voxel_map.empty()");
+    printf("[ VIO ] visual_submap->add_from_voxel_map.empty(), need raycasting");
   }
 
   // 2. 从视觉子图 visual_submap 中筛选出具有高角点响应值的点，并将其加入到视觉地图中
@@ -1626,6 +1628,7 @@ void VIOManager::precomputeReferencePatches(int level)
 
         // 重投影误差模型的雅克比矩阵
         // 右扰动模型
+        // https://github.com/hku-mars/FAST-LIVO2/issues/205
         JdR = Jimg * Jdpi * R_ref_w * p_w_hat;
         Jdt = -Jimg * Jdpi * R_ref_w;
 
@@ -1719,7 +1722,7 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
           z(i * patch_size_total + x * patch_size + y) = res;
           patch_error += res * res;
 
-          // H_sub_inv 来自预先计算的jacobian
+          // H_sub_inv 来自预先计算的jacobian,不需要重复计算
           MD(1, 3) J_dR = H_sub_inv.block<1, 3>(i * patch_size_total + x * patch_size + y, 0);
           MD(1, 3) J_dt = H_sub_inv.block<1, 3>(i * patch_size_total + x * patch_size + y, 3);
 
@@ -1805,7 +1808,7 @@ void VIOManager::updateState(cv::Mat img, int level)
     V3D Pwi(state->pos_end); // 当前帧imu的状态估计平移
     Rcw = Rci * Rwi.transpose(); // 当前帧相机到世界坐标系的旋转
     Pcw = -Rci * Rwi.transpose() * Pwi + Pci; // 当前帧相机到世界坐标系的平移
-    Jdp_dt = Rci * Rwi.transpose(); // Pcw 对 Pwi 位姿对平移求偏导是R(右乘扰动)，将 IMU 平移误差映射到相机坐标空间
+    Jdp_dt = Rci * Rwi.transpose(); // TODO: Pcw 对 Pwi 位姿对平移求偏导是R(右乘扰动)，将 IMU 平移误差映射到相机坐标空间
     
     float error = 0.0;
     int n_meas = 0;
@@ -1821,9 +1824,11 @@ void VIOManager::updateState(cv::Mat img, int level)
     {
       // 为每个候选点计算 jacobian 
       // printf("thread is %d, i=%d, i address is %p\n", omp_get_thread_num(), i, &i);
-      MD(1, 2) Jimg;
-      MD(2, 3) Jdpi;
-      MD(1, 3) Jdphi, Jdp, JdR, Jdt;
+      MD(1, 2) Jimg; // 像素梯度*逆曝光时间*缩放系数
+      MD(2, 3) Jdpi; // 像素坐标对归一化相机坐标的偏导
+      MD(1, 3) Jdphi; // 
+      MD(1, 3) Jdp; // 像素对归一化相机坐标的偏导
+      MD(1, 3) JdR, Jdt;
 
       float patch_error = 0.0; // 当前图像块所有像素光度误差平方和
       int search_level = visual_submap->search_levels[i]; // 表示第 i 个特征点在图像金字塔中合适的搜索层级
@@ -1886,10 +1891,13 @@ void VIOManager::updateState(cv::Mat img, int level)
           Jimg = Jimg * state->inv_expo_time;
           Jimg = Jimg * inv_scale;
 
+          // 这里的p_hat感觉漏了一个负号,原仓库有讨论 https://github.com/hku-mars/FAST-LIVO2/issues/205
+          // maybe: Jdphi = Jimg * Jdpi * (-1 * p_hat);
           Jdphi = Jimg * Jdpi * p_hat; // 投影误差对相机归一化坐标的偏导
           Jdp = -Jimg * Jdpi;
 
           // TODO: 观测误差对 IMU 状态的偏导，从投影空间映射到imu状态空间
+          // 从相机空间再转回了imu空间，右乘了se3的右扰动更新项
           JdR = Jdphi * Jdphi_dR + Jdp * Jdp_dR; // 对旋转求偏导
           Jdt = Jdp * Jdp_dt; // 对平移求偏导
 
@@ -1898,6 +1906,7 @@ void VIOManager::updateState(cv::Mat img, int level)
               w_ref_tl * img_ptr[0] + w_ref_tr * img_ptr[scale] + w_ref_bl * img_ptr[scale * width] + w_ref_br * img_ptr[scale * width + scale];
           
           // 构建残差(逆曝光*像素值), 乘以逆曝光时间平衡亮度变化
+          // 比较当前像素与其它相同图像块（但是视角不同）的像素
           double res = state->inv_expo_time * cur_value - inv_ref_expo * P[patch_size_total * level + x * patch_size + y];
 
           // 第i个图像块中的第x * patch_size + y个像素的残差
@@ -2013,7 +2022,7 @@ void VIOManager::plotTrackedPoints()
     VisualPoint *pt = visual_submap->voxel_points[i];
     V2D pc(new_frame_->w2c(pt->pos_));
 
-    // 优化后的残差小于原残差，对应视觉特征点显示为绿色，否则为蓝色
+    // 优化后的残差小于原残差，对应视觉特征点显示为绿色，否则为蓝色 BGR
     if (visual_submap->errors[i] <= visual_submap->propa_errors[i])
     {
       // inlier_count++;
@@ -2130,6 +2139,7 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
   // 5. 绘制视觉子地图中的视觉特征点
   plotTrackedPoints();
 
+  // 可视化当前帧与参考帧之间的图像块匹配结果（如光度误差、法向量投影等）
   if (plot_flag) projectPatchFromRefToCur(feat_map);
 
   double t5 = omp_get_wtime();
