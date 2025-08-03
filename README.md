@@ -97,7 +97,16 @@ Download our collected rosbag files via OneDrive ([**FAST-LIVO2-Dataset**](https
 roslaunch fast_livo mapping_avia.launch
 rosbag play YOUR_DOWNLOADED.bag
 ```
+## 保存为colmap 格式
 
+```
+common -->img_en: 1
+pcd_save:
+  pcd_save_en: true
+  colmap_output_en: true # need to set interval = -1
+  filter_size_pcd: 0.15
+  interval: -1
+```
 
 ## 5. License
 
