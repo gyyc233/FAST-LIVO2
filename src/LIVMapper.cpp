@@ -968,7 +968,7 @@ bool LIVMapper::sync_packages(LidarMeasureGroup &meas)
         return false;
       } 
 
-      meas.lidar_frame_beg_time = lid_header_time_buffer.front();　// generate lidar_frame_beg_time
+      meas.lidar_frame_beg_time = lid_header_time_buffer.front(); // generate lidar_frame_beg_time
       meas.lidar_frame_end_time = meas.lidar_frame_beg_time + meas.lidar->points.back().curvature / double(1000); // calc lidar scan end time
       meas.pcl_proc_cur = meas.lidar;
       lidar_pushed = true;  // flag
