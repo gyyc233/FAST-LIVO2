@@ -57,7 +57,7 @@ public:
   // 计算imu误差状态系数矩阵更新 _state，并进行lidar点云去畸变
   void processImu();
   
-  // 根据模式，组装lidar,imu,image数据
+  // 根据模式，组装lidar,imu,image数据,使它们同步
   bool sync_packages(LidarMeasureGroup &meas);
   
   // 单次imu状态传播

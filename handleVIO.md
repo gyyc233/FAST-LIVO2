@@ -288,7 +288,9 @@ Feature 关联`Feature *ftr_new = new Feature(pt_new, patch, pc, f, new_frame_->
 
 ## dumpDataForColmap() 保存colmap文件
 
-- 保存相机外参，图像，编号
+- 保存相机外参，图像(去畸变后)，编号
+- 保存哪些图像帧
+  - 每次调用`handleVIO`则保存此时的图像帧,这由`handleLIO`调用频率决定，所以保存频率大概是10hz
 
 # processFrame 结束后
 

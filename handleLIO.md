@@ -26,6 +26,8 @@
 
 ### lidar降采样与体素地图创建，构造八叉树地图
 
+这个初始化点云体素地图只做一次，后续lidar点云直接走`StateEstimation`,故需要重新计算协方差
+
 1. 对去畸变后的lidar点云做降采样，copy为lidar body坐标系系点云与世界坐标系点云到`voxelmap_manager->feats_down_body_` `voxelmap_manager->feats_down_world_`
 2. (若是首次创建)初始化lidar点云体素地图`voxelmap_manager->BuildVoxelMap()`
    1. lidar body系下点云不确定性计算（每个点协方差矩阵计算）(测距不确定性+方位不确定性)

@@ -26,27 +26,27 @@ LIVO2 主流程
 
 1. LIVMapper mapper.initializeSubscribersAndPublishers()
    1. lidar 点云回调
-      1. [点云预处理](#点云预处理) `PreprocessPtr p_pre->process(msg, ptr);`, save to `lid_raw_data_buffer`
+      1. [点云预处理](#点云预处理) `PreprocessPtr p_pre->process(msg, ptr);`, save to `lid_raw_data_buffer`(TODO:没有调用`Preprocess::give_feature`吗?)
    2. imu 回调
       1. 检查imu与lidar时间对齐,ros_driver_fix_en 强制硬同步，保存在 `imu_buffer`, `prop_imu_buffer`
    3. image 回调，缓存至 `img_buffer`
-   4. 定时器 imu_prop_callback：
-      1. 等待imu初始化，完成一次ekf位姿估计 `prop_imu_once(imu_propagate, dt, acc_imu, omg_imu)` 
+   4. 定时器 imu_prop_callback 0.04秒触发一次：
+      1. 等待imu初始化，完成一次imu前向传播(imu积分) `prop_imu_once(imu_propagate, dt, acc_imu, omg_imu)` 
       2. 若state_update_flg（该标志在handleVIO handleLIO 中使能），基于prop_imu_buffer 数据，进行[imu前向传播](#imu-单次状态更新) `prop_imu_once(imu_propagate, dt, acc_imu, omg_imu)`，否则只对newest_imu进行传播，更新imu
       3. 提取更新后的imu_propagate发布到 `/LIVO2/imu_propagate`
 2. LIVMapper::run() 
    1. `sync_packages()`，组装数据到`LidarMeasureGroup &meas`->`LidarMeasures`
       1. ONLY_LIO：同步lidar点云与imu数据, 组装数据`MeasureGroup m` 到 `LidarMeasureGroup &meas`,meas.lio_vio_flg = LIO; 
-      2. LIVO,该模式下，LIO比VIO优先,它们顺序更新，LIO构建体素点云地图与几何结构，VIO进行着色与补点
-         1. VIO，组装lidar点云与imu数据，后`meas.lio_vio_flg = LIO;`，进入LIO分支
-         2. LIO，组装图像帧数据，后`meas.lio_vio_flg = VIO;`，进入VIO分支
+      2. LIVO,该模式下，LIO比VIO优先,它们按顺序更新，**先执行LIO再执行VIO**，LIO构建体素点云地图与几何结构，VIO进行着色与补点
+         1. VIO，组装lidar点云与imu数据（选择前后两帧lidar之间的imu），后`meas.lio_vio_flg = LIO;`，进入LIO分支
+         2. LIO，组装图像帧数据,记录图像帧时间与上一次lio时间(`m.vio_time` `m.lio_time`)，后`meas.lio_vio_flg = VIO;`，进入VIO分支
       3. ONLY_LO，仅使用lidar数据
    2. `LIVMapper::handleFirstFrame()` 首帧数据标志
-   3. `LIVMapper::processImu()`
+   3. `LIVMapper::processImu()` 对imu做ESKF真值状态量预测,对lidar点云做运动畸变矫正以及重力方向对齐
       1. `ImuProcess p_imu->Process2(LidarMeasures, _state, feats_undistort);` 计算imu误差状态系数矩阵更新 _state，并进行lidar点云去畸变
          1. `Forward_without_imu(lidar_meas, stat, *cur_pcl_un_);` 参考FAST-LIO 中的误差状态jacobian进行推导，如果没有imu数据则只对位姿与速度进行更新
          2. `ImuProcess::IMU_init` [imu静止初始化](#imu-初始化)
-         3. `void ImuProcess::UndistortPcl` 参考FAST-LIO imu 误差状态转移方程 (ESKF)前向传播imu data,然后对lidar点云进行去畸变（后向传播）
+         3. `void ImuProcess::UndistortPcl` 参考FAST-LIO imu 误差状态转移方程 (ESKF)前向传播imu data(前向状态量预测积分),然后对lidar点云进行去畸变（后向传播）
       2. `gravityAlignment()` [重力方向对齐](#重力方向对齐)，原配置文件默认不执行，在imu初始化完成后执行一次
       3. 将前向传播，后向传播的结果（状态向量与去畸变点云）保存到 `voxelmap_manager->state_ = _state;voxelmap_manager->feats_undistort_ = feats_undistort;`
    4. `LIVMapper::stateEstimationAndMapping() ` 基于`LidarMeasures.lio_vio_flg`执行LIO或者VIO流程
@@ -112,7 +112,7 @@ LIVO2 主流程
 `void LIVMapper::gravityAlignment() ` 
 
 ```cpp
-   V3D ez(0, 0, -1); // 理想世界坐标系下重力方向 
+   V3D ez(0, 0, -1); // 理想世界坐标系(或者imu对应的世界坐标系)下重力方向 
    V3D gz(_state.gravity);
    // Quaterniond::FromTwoVectors 根据两个向量，得到旋转
    // 将 IMU 估计的重力方向 gz 转换为世界坐标系方向 ez，得到一个旋转向量 G_q_I0

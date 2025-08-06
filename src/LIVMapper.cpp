@@ -382,7 +382,7 @@ void LIVMapper::handleLIO()
   if (!lidar_map_inited) 
   {
     lidar_map_inited = true;
-    // 创建初始体素地图
+    // 创建初始体素地图，只执行一次,所有后续点要通过 StateEstimation 重新计算协方差
     voxelmap_manager->BuildVoxelMap();
   }
 
