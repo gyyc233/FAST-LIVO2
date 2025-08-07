@@ -147,7 +147,7 @@ public:
 
   ofstream fout_camera, fout_colmap;
   unordered_map<VOXEL_LOCATION, VOXEL_POINTS *> feat_map; // 全局视觉点体素地图
-  unordered_map<VOXEL_LOCATION, int> sub_feat_map; 
+  unordered_map<VOXEL_LOCATION, int> sub_feat_map; // 记录每个世界坐标系下lidar点云对应体素位置（这里是体素，不是网格）与标记情况
   unordered_map<int, Warp *> warp_map; // 帧之间仿射变换的映射表
   vector<VisualPoint *> retrieve_voxel_points; // 每个网格中最靠近相机的视觉特征点
   vector<pointWithVar> append_voxel_points;

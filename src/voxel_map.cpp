@@ -444,7 +444,7 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
 
       // 雷达坐标系下点的误差协方差矩阵
       M3D cov = body_cov_list_[i];
-      // 世界坐标系下点坐标构成的反对称矩阵
+      // lidar坐标系下点坐标构成的反对称矩阵
       M3D point_crossmat = cross_mat_list_[i];
 
       // 这里和引用文献中使用的公式不一致

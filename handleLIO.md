@@ -42,9 +42,9 @@
 1. 体素地图初始完后，后面新来的lidar点需要重新进行body协方差计算
 2. 进入迭代误差卡尔曼流程
    1. 迭代次数i
-      1. 计算点在世界坐标系下的总协方差
+      1. 计算点在世界坐标系下的总协方差(点云在体坐标系下的协方差+状态量里的平移，旋转协方差)
       2. lidar点，点到各自平面模型距离残差估计`BuildResidualListOMP`->`total_residual`
-      3. 对所有lidar点云，计算观测方程对x_k(其实是对R T的jacobian)的jacobian矩阵，然后计算`hessian matrix = ``Hsub`
+      3. 对所有lidar点云，计算观测方程对x_k(其实是对R T的jacobian)的jacobian矩阵，然后计算`hessian matrix = ``Hsub`（该部分沿用了fast-lio 中观测方程对对状态量的jacobian）并记录那些点的残差
       4. ESIKF update, 计算HTz为`HTz为 H^T * R^-1 * -z` (H为jacobian, R为系统观测协方差，z为残差)，`H_T_H为H^T * R^-1 * H`
       5. 计算卡尔曼增益`(H^T * R^-1 * H + P)^-1 * H^T * R^-1`，这里用的高位观测等效处理方法
       6. 计算`vec 为 (x_predict ⊟ x_ki)`

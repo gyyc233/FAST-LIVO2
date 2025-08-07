@@ -19,6 +19,8 @@
 
 # handleVIO
 
+LIO VIO是顺序执行的，通常是先执行完毕lio之后在执行vio
+
 `void LIVMapper::handleVIO()`，lidar点云对应`pcl_w_wait_pub`,主要流程
 
 ```cpp
@@ -29,6 +31,7 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
 
 - 图像帧图像经过缩放后转灰度图，绑定相机内参，初始化Frame `new_frame_`
 - `void VIOManager::updateFrameState(StatesGroup state)` 将imu基于世界坐标系的位姿转为相机基于世界坐标系的位姿
+- 基于lio估计的状态结果，估计当前帧图像在世界坐标系下的位姿
 
 ```cpp
 void VIOManager::updateFrameState(StatesGroup state)
@@ -56,23 +59,25 @@ void VIOManager::updateFrameState(StatesGroup state)
 /// @param plane_map lidar 点云体素地图
 void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &pg, const unordered_map<VOXEL_LOCATION, VoxelOctoTree *> &plane_map)
 ```
-**首次进入VIO时,feat_map为空, total_points为0，会跳过 computeJacobianAndUpdateEKF(), 优先执行 generateVisualMapPoints()**
+**首次进入VIO时, total_points 为0，会跳过 computeJacobianAndUpdateEKF(), 优先执行 generateVisualMapPoints()**
 
-1. 对lidar 点云pg每个点，标记其在体素地图中的位置到`sub_feat_map`, 计算从世界坐标系`pt_w`转到当前数觉图像帧的相机坐标系`pt_c`并转为像素坐标`px`,若`px`处于图像内部则用此时`pt_c`的z作为当前图像帧该像素点的深度,初始化深度图`depth_img`
-2. 基于`sub_feat_map`,在`feat_map`全局视觉点体素地图中遍历，若在全局体素地图中发现`sub_feat_map`中的体素
-   1. 遍历`feat_map`该视觉点体素地图的所有点云，计算这`VisualPoint`点云对应当前视觉图像帧的像素坐标，并转换为图像网格，定义该网格属性`grid_num[index] = TYPE_MAP` 表明该网格已有地图点可见，避免后续对该网格进行冗余的光线投射（raycasting）操作
-   2. 遍历`feat_map`该视觉点体素地图的所有点云，按照图像网格id，计算它们到当前视觉图像帧相机的最短距离，并保存（对于每个网格）最短距离和对应视觉特征点`map_dist[index]` `retrieve_voxel_points[index]`(`retrieve_voxel_points` 中保存的是`VisualPoint`)
+**重置 `visual_submap` and `sub_feat_map`**
+
+1. 对lidar 点云pg每个点，标记其在体素地图中的位置到`sub_feat_map`(sub_feat_map在这一步初始化了，这个hashmp中记录了此次有记录的网格id), 计算从世界坐标系`pt_w`转到当前数觉图像帧的相机坐标系`pt_c`并转为像素坐标`px`,若`px`处于图像内部则用此时`pt_c`的z作为当前图像帧该像素点的深度,初始化深度图`depth_img`
+2. 基于`sub_feat_map`,在`feat_map`全局视觉点体素地图中遍历，若在全局体素地图中发现`sub_feat_map`中的体素(找到属于该体素的所有特征点 VisualPoint)
+   1. 遍历`feat_map`该视觉点体素的所有点，计算这`VisualPoint`点云对应当前视觉图像帧的像素坐标，并转换为图像网格，定义该网格属性`grid_num[index] = TYPE_MAP` 表明该网格已有地图点可见，避免后续对该网格进行冗余的光线投射（raycasting）操作
+   2. 然后对同一网格的3d点进行筛选，计算它们到当前视觉图像帧相机的最短距离，并保存（对于每个网格）最短距离和对应视觉特征点`map_dist[index]` `retrieve_voxel_points[index]`(`retrieve_voxel_points` 中保存的是`VisualPoint`)
 3. (由`raycast_en`判断是否执行，默认是禁用)`feat_map`有时无法完全覆盖`grid_num`,若某些网格没有被点云地图点占据，则使用光线投射 Raycasting 方法
    1. 遍历`rays_with_sample_points`(这个是网格预采样点，里面是归一化坐标)光线投射采样点，保存采样点转世界坐标`sample_point_w`, 跳过在`sub_feat_map`中出现的点
    2. 在`feat_map`中查找，过程基本与上一步一致，找出对应图像网格中距离当前视觉图像帧最近的视觉特征点id并保存数据
    3. `feat_map`不存在上述目标, 则在`plane_map`lidar点云体素地图中搜索最接近`sample_point_w`的节点`current_octo`，若`current_octo`具有自己的平面模型,执行`visual_submap->add_from_voxel_map.push_back(plane_center);`, 用于在后续生成视觉地图点
 4. 筛选高质量视觉点，遍历所有网格
    1. 对于`grid_num[i] == TYPE_MAP`, 获取`VisualPoint *pt = retrieve_voxel_points[i]` 该网格中最靠近相机的视觉特征点,计算其相机坐标与像素坐标
-      1. 计算该点从世界坐标系投影到相机坐标系下的深度`pt_cam[2]`与之前深度图(对应pitch中的所像素)中的深度(这里的深度从lidar点云中得到)`depth`比较，观察深度一致性，保留前后深度一致的点继续下一步处理
-   2. 为视觉特征点寻找最合适的参考图像参考帧
-      1. 若启用法向量计算
-         1. 遍历该视觉特征点的所有观测数据`pt->obs_(Feature)`, 计算两两视角下图像块(`float*`)之间的光度误差`photometric error`, 选择最小光度误差视角的图像块作为该视觉特征点的最佳参考帧`pt->ref_patch`
-      2. 否则使用视角相似性`getCloseViewObs`（如角度差异和距离）来选择参考特征
+      1. 计算该点从世界坐标系投影到相机坐标系下的深度`pt_cam[2]`与之前深度图(对应pitch中的所有像素)中的深度(这里的深度从lidar点云中得到)`depth`比较，观察深度一致性，保留前后深度一致的点继续下一步处理
+   2. 为该视觉特征点寻找最合适的参考图像参考帧
+      1. 若启用法向量计算(默认启用)
+         1. 遍历该视觉特征点(`每个网格中最靠近相机的 VisualPoint`)的所有观测数据`pt->obs_(Feature)`, 计算两两视角下图像块(`float*`)之间的光度误差`photometric error`, 选择最小光度误差视角(obs_中的feature)的图像块作为该视觉特征点(`VisualPoint pt`)的最佳参考帧(`feature`)`pt->ref_patch`
+      2. 否则使用视角相似性`getCloseViewObs`（如角度差异和距离）来选择参考特征(选择最接近当前图像帧位姿的obs_位姿作为参考图像块)
          1. 对每个观测特征，获取其对应帧的相机中心位置，计算地图点看向该帧的方向向量和该地图点转换到相机帧下的坐标，选择它们夹角最小的视角作为最佳参考帧
    3. 计算当前视觉帧与参考视觉帧的仿射变换`A_cur_ref_zero`
       1. 若启用法向量计算
@@ -82,8 +87,8 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
          4. 根据仿射变换矩阵的行列式值判断需要在图像金字塔中的哪个层级进行搜索
       2. 否则若缓存中已有该参考帧对应的仿射变换信息（通过 warp_map 查找），则直接复用
          1. 如果没有缓存信息，用深度信息、相机模型和帧间变换，计算出一个局部的仿射变换矩阵`getWarpMatrixAffine`
-   4. 遍历图像金字塔的不同层级（pyramid_level），使用仿射变换`A_cur_ref_zero`对参考帧中的图像块进行变形操作,将参考帧图像块变换到当前帧图像块中`patch_wrap.data()`
-   5. 从当前帧图像中提取以 pc 点为中心的图像块，并使用双线性插值方法进行亚像素级别的采样，结果保存在 patch_buffer 中
+   4. 遍历图像金字塔的不同层级（pyramid_level），使用仿射变换`A_cur_ref_zero`对pt点参考帧中的图像块进行变形操作,将参考帧图像块变换到当前帧图像块中`patch_wrap.data()`
+   5. 从当前帧图像中提取以 pc(pt在当前帧中对应的像素) 点为中心的图像块，并使用双线性插值方法进行亚像素级别的采样，结果保存在 patch_buffer 中
    6. 遍历图像块中的每一个像素点, 计算当前帧图像块（patch_buffer）与参考帧图像块（patch_wrap）之间的像素差值(考虑曝光时间的逆)`error`
    7. 计算仿射变换后的图像块与当前帧图像块的归一化互相关NCC
    8. 保存数据到`visual_submap`，保存了哪些lidar点能用于视觉图像对齐的信息
@@ -159,7 +164,9 @@ jacobian矩阵只计算一次并没有伴随迭代更新计算
 
 `VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)`
 
-1. 遍历lidar点云 pg , 筛选出具有高角点响应值的点，计算其图像网格id, 若该网格尚未被地图中的点占据`grid_num[index] != TYPE_MAP`, 计算该点的 Shi-Tomasi 角点响应值 cur_value，若大于该网格记录最大响应值则更新，并作以下处理
+
+1. 世界坐标系下的lidar点云转到当前图像帧坐标系下，计算其像素坐标和它对应的网格id
+2. 遍历lidar点云 pg , 筛选出具有高角点响应值的点，计算其图像网格id, 若该网格尚未被地图中的点占据`grid_num[index] != TYPE_MAP`, 计算该点的 Shi-Tomasi 角点响应值 cur_value，若大于该网格记录最大响应值则更新，并作以下处理
 
 ```cpp
    // 如果该网格尚未被地图中的点占据
@@ -200,8 +207,8 @@ jacobian矩阵只计算一次并没有伴随迭代更新计算
 3. 对于每个`grid_num[index] = TYPE_POINTCLOUD`的网格
    1. 获取对应世界坐标点`pointWithVar pt_var = append_voxel_points[i]`，世界坐标`V3D pt = pt_var.point_w`, 转到当前图像帧相机,计算相机坐标(单位方向向量)`dir` 像素坐标`pc` 法向量`norm_vec`
    2. 计算方向向量与法向量的夹角余弦, 检查是否要反转法向量方向
-   3. 提取以像素坐标 pc 为中心的图像块 patch，采用双线性插值方法处理亚像素精度
-   4. 创建视觉特征点对象`VisualPoint *pt_new = new VisualPoint(pt)`与它的观测帧`Feature *ftr_new`
+   3. 提取以像素坐标 pc 为中心的图像块（8*8像素块大小的区域） patch，采用双线性插值方法处理亚像素精度
+   4. 基于世界坐标系下lisar点pt，创建视觉特征点对象`VisualPoint *pt_new = new VisualPoint(pt)`与它的观测帧`Feature *ftr_new`
       1. 将观测帧加入该视觉特征点的观测历史`pt_new->addFrameRef(ftr_new)`
    5. 插入新视觉特征点到体素地图中`insertPointIntoVoxelMap(pt_new)`
 
@@ -220,10 +227,11 @@ Feature 关联`Feature *ftr_new = new Feature(pt_new, patch, pc, f, new_frame_->
 - patch: 2d像素邻域图像块
 - pc: 3d点对应的2d像素
 - f: 方向向量
-- 相机帧到世界的RT变换
+- 相机帧到世界的RT变换(相机帧位姿)
 - 曝光时间的逆
+- 对应图像与它的id
 
-最后VisualPoint插入到点云体素地图`feat_map`中
+最后VisualPoint插入到点云体素地图`feat_map`中`insertPointIntoVoxelMap(pt_new)`,外层循环遍历所有网格grid
 
 ### insertPointIntoVoxelMap 插入新视觉特征点到体素地图中
 

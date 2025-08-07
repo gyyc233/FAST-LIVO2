@@ -518,6 +518,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
   // 遍历当前帧视野中可能相关的体素
   for (auto &iter : sub_feat_map)
   {
+    // 遍历体素位置
     VOXEL_LOCATION position = iter.first;
 
     // double t4 = omp_get_wtime();
@@ -561,6 +562,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
           float cur_dist = obs_vec.norm();
           if (cur_dist <= map_dist[index])
           {
+            // index 是网格 grid id
             map_dist[index] = cur_dist; // 存储最靠近相机的最小距离与最近视觉特征点
             retrieve_voxel_points[index] = pt;
           }
@@ -722,7 +724,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       VisualPoint *pt = retrieve_voxel_points[i]; // 该网格中最靠近相机的视觉特征点
       // visual_sub_map_cur.push_back(pt); // before
 
-      V2D pc(new_frame_->w2c(pt->pos_));
+      V2D pc(new_frame_->w2c(pt->pos_)); // pt对应在当前图像帧中的像素
 
       // cv::circle(img_cp, cv::Point2f(pc[0], pc[1]), 3, cv::Scalar(0, 0, 255), -1, 8); // Green Sparse Align tracked
 
@@ -749,7 +751,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
             break;
           }
         }
-        // 如果检测到深度跳跃，则认为这个点可能不可靠，丢弃处理
+        // 如果检测到深度跳跃，则认为这个点可能不可靠，丢弃处理，这里好像没啥区别处理
         if (depth_continous) break;
       }
       if (depth_continous) continue;
@@ -757,7 +759,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       // t_2 += omp_get_wtime() - t_1;
 
       // t_1 = omp_get_wtime();
-      Feature *ref_ftr;
+      Feature *ref_ftr; // VisualPoint pt 对应的参考图像观测特征
       std::vector<float> patch_wrap(warp_len);
 
       int search_level;
@@ -771,7 +773,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       // 如果启用了法向量信息，则通过比较不同视角下图像块的光度误差来选择最稳定的参考特征
       if (normal_en)
       {
-        float phtometric_errors_min = std::numeric_limits<float>::max();
+        float phtometric_errors_min = std::numeric_limits<float>::max(); // 最小光度误差
 
         // 如果只有一条观测数据（pt->obs_.size() == 1），就直接把它作为参考特征
         if (pt->obs_.size() == 1)
@@ -874,7 +876,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
       for (int pyramid_level = 0; pyramid_level <= patch_pyrimid_level - 1; pyramid_level++)
       {
-        // 遍历图像金字塔的不同层级（pyramid_level），对参考帧中的图像块进行变形操作
+        // 遍历图像金字塔的不同层级（pyramid_level），对pt参考帧中的图像块进行变形操作
         // 对图像块进行不同分辨率下的仿射变换
         warpAffine(A_cur_ref_zero, ref_ftr->img_, ref_ftr->px_, ref_ftr->level_, search_level, pyramid_level, patch_size_half, patch_wrap.data());
       }
@@ -883,9 +885,9 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       // 从当前帧图像中提取以 pc 点为中心的图像块，并使用双线性插值方法进行亚像素级别的采样，结果保存在 patch_buffer 中
       getImagePatch(img, pc, patch_buffer.data(), 0);
 
-      float error = 0.0;
+      float error = 0.0; // pt 当前图像patch与参考patch之间的像素差
       // 遍历图像块中的每一个像素点
-      // 计算当前帧图像块（patch_buffer）与参考帧图像块（patch_wrap）之间的像素差值
+      // 计算pt当前帧图像块（patch_buffer）与pt参考观测帧图像块（patch_wrap）之间的像素差值
       for (int ind = 0; ind < patch_size_total; ind++)
       {
         // 曝光时间的倒数，即越亮的图像其值越小
@@ -1027,6 +1029,7 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
 
   // 3. 从候选点中选取符合几何（点在相机前方）和光照条件的高质量视觉特征点
   int add = 0;
+  // length 网格总数
   for (int i = 0; i < length; i++)
   {
     // 表示之前筛选出一个潜在的高质量角点（来自激光雷达或 Raycasting）
@@ -1049,7 +1052,7 @@ void VIOManager::generateVisualMapPoints(cv::Mat img, vector<pointWithVar> &pg)
       getImagePatch(img, pc, patch, 0);
 
       VisualPoint *pt_new = new VisualPoint(pt); // 基于lidar点创建新视觉点对象
-      Vector3d f = cam->cam2world(pc); // pc 转到相机帧中的3d坐标
+      Vector3d f = cam->cam2world(pc); // pc 转到相机帧(TODO:相机归一化平面)中的3d坐标
       // pt_new VisualPoint
       // patch ptlidar点（对应像素）邻域的图像块
       // pc 对应2d像素
@@ -2115,7 +2118,7 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
 
   // 1. 基于LIO先验更新当前图像帧状态
   updateFrameState(*state);
-  
+
   // 重置图像网格信息
   resetGrid();
 
