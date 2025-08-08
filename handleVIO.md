@@ -100,13 +100,13 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
    visual_submap->propa_errors.push_back(error); // 存储当前点的传播误差（propagation error），用于评估追踪质量
    visual_submap->search_levels.push_back(search_level); // 记录在金字塔图像中进行匹配所使用的层级（level），用于后续调整搜索策略
    visual_submap->errors.push_back(error);
-   visual_submap->warp_patch.push_back(patch_wrap); // 存储经过仿射变换后对齐的图像块（warped patch），可用于下一帧的追踪或光流计算
+   visual_submap->warp_patch.push_back(patch_wrap); // 存储经过仿射变换后对齐的pt对应参考图像块（warped patch），可用于下一帧的追踪或光流计算
    visual_submap->inv_expo_list.push_back(ref_ftr->inv_expo_time_); // 存储参考帧的逆曝光时间（inverse exposure time），用于光度一致性补偿，避免不同光照条件下的误差放大
 ```
 
 ## `computeJacobianAndUpdateEKF` 基于LK光流和IEKF进行状态更新（不适用GN增量方程）
 
-若`total_points`为0,不执行
+若`total_points`为0,不执行，要在`retrieveFromVisualSparseMap`生效后才会执行
 
 - 若启用了`inverse_composition_en`则使用逆向光流法计算光流，提高效率(这里和LIVO1 不同),调用`updateStateInverse(img, level)`
 - 否则调用`updateState(img, level)`
@@ -114,9 +114,9 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
 ### `updateState(cv::Mat img, int level)` 迭代计算LK光流jacobian并进行IEKF更新状态
 
-迭代计算以下内容
+**IEKF迭代计算以下内容,每次迭代，每个点的jacobian全程都需要重新求**
 
-1. 从state中获取当前imu旋转平移并转换到camera,得到camera to world pose,计算位姿对平移向量求偏导(右扰动模型)
+1. 从state(基于lio的先验)中获取当前imu旋转平移并转换到camera,得到camera to world pose,计算位姿对平移向量求偏导(右扰动模型)
 
 ```cpp
     M3D Rwi(state->rot_end); // 当前帧imu的状态估计旋转
@@ -247,9 +247,13 @@ Feature 关联`Feature *ftr_new = new Feature(pt_new, patch, pc, f, new_frame_->
 
 ## projectPatchFromRefToCur 可视化当前帧与参考帧之间的图像块匹配结果（如光度误差、法向量投影等）
 
+将`visual_submap->voxel_points pt`中的点对应参考帧图像块投影到当前视觉帧
+
 `visual_submap->voxel_points`为空时会跳过这个步骤
 
 ## updateVisualMapPoints(cv::Mat img) 为视觉特征点添加新的图像观测帧信息
+
+如果pt对应的当前图像帧`patch`与`obs_`最后一帧`patch`差异较大时，将新的patch加入到pt的obs_
 
 `total_points`为0时跳过
 
@@ -283,11 +287,13 @@ Feature 关联`Feature *ftr_new = new Feature(pt_new, patch, pc, f, new_frame_->
 
 `updateReferencePatch(feat_map),feat_map在函数替换为plane_map` 对视觉子地图中的所有视觉特征点`visual_submap->voxel_points`作以下处理
 
+需要pt完成法向量估计，pt点未收敛，obs_数量大于5，添加过新的patch才能继续往下执行
+
 1. 对视觉特征点`VisualPoint *pt = visual_submap->voxel_points[i]`计算其空间体素位置并在`plane_map`中搜索最靠近`pt`的八叉树叶子节点`VoxelOctoTree *current_octo`
 2. 若该节点具有平面模型，计算视觉特征点`pt`到该平面距离和`pt`到点云平面中心的距离平方，计算该点投影该点到平面上的距离`range_dis`，如果`range_dis<=3 * plane.radius_`
    1. 视觉点与平面模型不确定度(协方差)建模`sigma_l`
    2. 若视觉特征点`pt`到该平面距离`dis_to_plane_abs`小于`3 * sqrt(sigma_l)`
-   3. 若法向量前后变化小且观测帧数量大于10则认为该视觉特征点已经收敛`pt->is_converged_ = true`
+   3. 若pt的法向量与平面的法向量变化小且观测帧数量大于10则认为该视觉特征点已经收敛`pt->is_converged_ = true`
 3. 对该视觉特征点`pt`所有的观测帧两两比较
    1. 获取`pt`在观测帧视角1下的图像块`ref_patch_temp`，并计算`pt`在观测帧视角1下的方向向量和法向量，然后计算该点图像块附近的平均灰度值`ref_mean`
    2. 计算视觉点`pt`在观测帧视角2下图像块`patch_cache`区域的灰度均值`other_mean`
@@ -306,6 +312,7 @@ Feature 关联`Feature *ftr_new = new Feature(pt_new, patch, pc, f, new_frame_->
 
 - `publish_frame_world` 需要`pcl_w_wait_pub`不为空,将`pcl_w_wait_pub`点加入`pcl_wait_pub`,将`pcl_wait_pub`点转到当前图像帧归一化坐标，判断深度是否合理，然后转为像素，判断是否在图像边界内
 - 通过3d点`pcl_wait_pub->points`转像素`pc`,对`pc`做双线性插值，计算亚像素`pixel`，赋予其rgb颜色
+- `pointRGB`xyz 来自`pcl_w_wait_pub`点云,颜色来自`pixel`
 - `pcl::toROSMsg`pcl转ros消息`laserCloudmsg`,发布`pubLaserCloudFullRes.publish(laserCloudmsg)`
 
 发布图像`publish_img_rgb`
@@ -317,5 +324,5 @@ pubImage.publish(out_msg.toImageMsg());
 # NEXT TODO:
 
 1. 在没有VIO时,直接使用lio的结果建立彩色点云，对比VIO对点云质量的提升
-2. VIO的实际意义还是没有完全理解，需要再次梳理
+2. VIO的实际意义还是没有完全理解，需要再次梳理 (vio图像对齐的过程基本梳一遍)
 3. 基于livo2的colmap结果,做3dgs,对3dgs渲染结果和livo2进行对比

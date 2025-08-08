@@ -935,7 +935,7 @@ void VIOManager::computeJacobianAndUpdateEKF(cv::Mat img)
   if (total_points == 0) return;
   
   compute_jacobian_time = update_ekf_time = 0.0;
-  // patch_pyrimid_level 由文件配置
+  // patch_pyrimid_level 由文件配置，从粗到细的图像金字塔搜索
   for (int level = patch_pyrimid_level - 1; level >= 0; level--)
   {
     // 若启用逆向合成则禁用视觉点参考帧缓存 一般叫 逆光流法，反向光流法 https://blog.csdn.net/guanjing_dream/article/details/129318349
@@ -1587,7 +1587,7 @@ void VIOManager::precomputeReferencePatches(int level)
     if (pt == nullptr) continue;
 
     double depth((pt->pos_ - pt->ref_patch->pos()).norm()); // 视觉点与其参考帧观测点之间的距离
-    V3D pf = pt->ref_patch->f_ * depth; // 视觉点在参考观测帧下的方向向量
+    V3D pf = pt->ref_patch->f_ * depth; // 视觉点在参考观测帧下的坐标
     V2D pc = pt->ref_patch->px_; // 视觉点在参考观测帧下的像素
     M3D R_ref_w = pt->ref_patch->T_f_w_.rotation_matrix(); // 参考观测帧的旋转矩阵
 
@@ -1675,6 +1675,7 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
     // 这里参考视觉帧像素的jacobian只计算了一遍，对比updateState()节约了计算量
     if (has_ref_patch_cache == false) 
     {
+      // 在pt对应的参考图像帧对应patch下计算jacobian->H_sub
       precomputeReferencePatches(level); // has_ref_patch_cache 在 precomputeReferencePatches() 内置为true
     }
     int n_meas = 0;
@@ -1695,11 +1696,11 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
 
       const int scale = (1 << level);
 
-      VisualPoint *pt = visual_submap->voxel_points[i];
+      VisualPoint *pt = visual_submap->voxel_points[i]; //  VisualPoint grid对应的3d点
 
       if (pt == nullptr) continue;
 
-      V3D pf = Rcw * pt->pos_ + Pcw; // 视觉特征点从世界坐标转到当前帧相机坐标系下
+      V3D pf = Rcw * pt->pos_ + Pcw; // 视觉特征点从世界坐标转到当前帧相机坐标系下，也可以称为帧坐标
       pc = cam->world2cam(pf);
 
       const float u_ref = pc[0];
@@ -1730,6 +1731,7 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
           MD(1, 3) J_dt = H_sub_inv.block<1, 3>(i * patch_size_total + x * patch_size + y, 3);
 
           // 将残差从图像梯度映射到当前imu状态空间
+          // Rwi P_wi_hat 是根据state更新的，所以会重新算
           JdR = J_dR * Rwi + J_dt * P_wi_hat * Rwi;
           Jdt = J_dt * Rwi;
           H_sub.block<1, 6>(i * patch_size_total + x * patch_size + y, 0) << JdR, Jdt;
@@ -1795,7 +1797,7 @@ void VIOManager::updateState(cv::Mat img, int level)
   bool EKF_end = false;
   float last_error = std::numeric_limits<float>::max();
 
-  // 图像块数量*每个图像块中的像素数
+  // 图像块数量*每个图像块中的像素数 = 像素数
   const int H_DIM = total_points * patch_size_total;
   z.resize(H_DIM);
   z.setZero();
@@ -1864,8 +1866,8 @@ void VIOManager::updateState(cv::Mat img, int level)
       float w_ref_bl = (1.0 - subpix_u_ref) * subpix_v_ref;
       float w_ref_br = subpix_u_ref * subpix_v_ref;
 
-      // warp_patch[i]: 之前通过仿射变换对齐的图像块数据
-      vector<float> P = visual_submap->warp_patch[i];
+      // warp_patch[i]: 之前通过仿射变换对齐的pt点对应的参考图像块数据
+      vector<float> P = visual_submap->warp_patch[i]; // 通过仿射变换对齐的pt点对应的参考图像块
       // inv_expo_list[i]: 存储了参考帧的逆曝光时间，用于补偿光照变化
       double inv_ref_expo = visual_submap->inv_expo_list[i];
       // ROS_ERROR("inv_ref_expo: %.3lf, state->inv_expo_time: %.3lf\n", inv_ref_expo, state->inv_expo_time);

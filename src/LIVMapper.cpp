@@ -771,7 +771,8 @@ void LIVMapper::standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
 
   mtx_buffer.unlock();
   // std::cout<<"[ LIVMapper::standard_pcl_cbk ] sig_buffer.notify_all"<<std::endl;
-  sig_buffer.notify_all();
+  // 未找到 sig_buffer wait 线程，这里的 sig_buffer 应该没有起到任何作用
+  sig_buffer.notify_all(); // 唤醒所有的等待(wait)线程。如果当前没有等待线程，则该函数什么也不做
 }
 
 void LIVMapper::livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg_in)
