@@ -91,6 +91,8 @@ public:
   vk::PinholeCamera *pinhole_cam; //  针孔相机投影模型
   StatesGroup *state; // 当前状态变量
   StatesGroup *state_propagat; // 传播后的状态变量
+
+  bool enable_vio; // 是否跳过vio,直接使用lio的先验进行图像对齐
   
   M3D Rli; // 传感器之间的旋转（下标 l:LiDAR; c:Camera; i:imu; w:world）
   M3D Rci; // 传感器之间的旋转（下标 l:LiDAR; c:Camera; i:imu; w:world）

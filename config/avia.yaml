@@ -9,10 +9,22 @@ common:
 extrin_calib:
   extrinsic_T: [0.04165, 0.02326, -0.0284]
   extrinsic_R: [1, 0, 0, 0, 1, 0, 0, 0, 1]
-  Rcl: [0.00610193,-0.999863,-0.0154172,
-        -0.00615449,0.0153796,-0.999863,
-        0.999962,0.00619598,-0.0060598] 
-  Pcl: [0.0194384, 0.104689,-0.0251952]
+  # Retail_Street, CBD_Building_01, Bright_Screen_Wall
+  # Rcl: [0.00610193,-0.999863,-0.0154172,
+  #       -0.00615449,0.0153796,-0.999863,
+  #       0.999962,0.00619598,-0.0060598] 
+  # Pcl: [0.0194384, 0.104689,-0.0251952]
+  # Red_Sculpture
+  # Rcl: [-0.00668,-0.99965,-0.02543,
+  #       -0.01151,0.02550,-0.99961,
+  #       0.99991,-0.00638,-0.01168]
+  # Pcl: [-0.00077, 0.04809, -0.00133]
+  # HKU_Landmark, HKU_Centennial_Garden, HKU_Main_Building, HKU_Cultural_Center_01, HKU_Cultural_Center_02, HKU_Lecture_Center_01, HKU_Lecture_Center_02
+  # CBD_Building_02, CBD_Building_03
+  Rcl: [-0.00200, -0.99975, -0.02211,
+        -0.00366, 0.02212, -0.99975,
+        0.99999, -0.00192, -0.00371]
+  Pcl: [0.00260, 0.05057, -0.00587]
 
 time_offset: 
   imu_time_offset: 0.0
@@ -77,7 +89,7 @@ evo:
   pose_output_en: false
 
 pcd_save:
-  pcd_save_en: false
+  pcd_save_en: true
   colmap_output_en: true # need to set interval = -1
   filter_size_pcd: 0.15
   interval: -1

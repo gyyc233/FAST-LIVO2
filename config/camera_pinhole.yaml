@@ -1,12 +1,42 @@
+# Retail_Street, CBD_Building_01, Bright_Screen_Wall
+# cam_model: Pinhole
+# cam_width: 1280
+# cam_height: 1024
+# scale: 0.5
+# cam_fx: 1293.56944
+# cam_fy: 1293.3155
+# cam_cx: 626.91359
+# cam_cy: 522.799224
+# cam_d0: -0.076160
+# cam_d1: 0.123001
+# cam_d2: -0.00113
+# cam_d3: 0.000251
+
+# Red_Sculpture
+# cam_model: Pinhole
+# cam_width: 1280
+# cam_height: 1024
+# scale: 0.5
+# cam_fx: 1294.7265716372897
+# cam_fy: 1294.8678078910468
+# cam_cx: 626.663267153558
+# cam_cy: 531.0334324363173
+# cam_d0: -0.07592763180373921
+# cam_d1: 0.12857252741674535
+# cam_d2: 0.0002726821691221157
+# cam_d3: 0.0002504335037343933
+
+# HKU_Landmark, HKU_Centennial_Garden, HKU_Main_Building, HKU_Cultural_Center_01, HKU_Cultural_Center_02, HKU_Lecture_Center_01, HKU_Lecture_Center_02
+# CBD_Building_02, CBD_Building_03
 cam_model: Pinhole
 cam_width: 1280
 cam_height: 1024
 scale: 0.5
-cam_fx: 1293.56944
-cam_fy: 1293.3155
-cam_cx: 626.91359
-cam_cy: 522.799224
-cam_d0: -0.076160
-cam_d1: 0.123001
-cam_d2: -0.00113
-cam_d3: 0.000251
+cam_fx: 1176.2874292149932
+cam_fy: 1176.21585445307
+cam_cx: 592.1187382755453
+cam_cy: 509.0864309628322
+cam_d0: -0.13218037625958456
+cam_d1: 0.15360732717073536
+cam_d2: 0.00036918417348059815
+cam_d3: -0.00031715324469463964

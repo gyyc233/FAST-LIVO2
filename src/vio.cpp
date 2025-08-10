@@ -15,6 +15,7 @@ which is included as part of this source code package.
 VIOManager::VIOManager()
 {
   // downSizeFilter.setLeafSize(0.2, 0.2, 0.2);
+  enable_vio = true;
 }
 
 VIOManager::~VIOManager()
@@ -2127,17 +2128,26 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
   double t1 = omp_get_wtime();
 
   // 2. 生成视觉稀疏地图
-  retrieveFromVisualSparseMap(img, pg, feat_map);
+  if(enable_vio)
+  {
+    retrieveFromVisualSparseMap(img, pg, feat_map);
+  }
 
   double t2 = omp_get_wtime();
 
   // 3. 基于LK光流和IEKF更新当前图像帧状态
-  computeJacobianAndUpdateEKF(img);
+  if(enable_vio)
+  {
+    computeJacobianAndUpdateEKF(img);
+  }
 
   double t3 = omp_get_wtime();
 
   // 4. 对没有地图点占据的网格，依次在lidar点，光线投射采样点（保存在visual_submap->add_from_voxel_map）点集中选择高分的shiTomasi点，插入到 feat_map 体素地图中
-  generateVisualMapPoints(img, pg);
+  if(enable_vio)
+  {
+    generateVisualMapPoints(img, pg);
+  }
 
   double t4 = omp_get_wtime();
   
@@ -2150,12 +2160,18 @@ void VIOManager::processFrame(cv::Mat &img, vector<pointWithVar> &pg, const unor
   double t5 = omp_get_wtime();
 
   // 6. 为视觉特征添加新的图像帧信息
-  updateVisualMapPoints(img);
+  if(enable_vio)
+  {
+    updateVisualMapPoints(img);
+  }
 
   double t6 = omp_get_wtime();
 
   // 7. 检查视觉点是否收敛，并更新视觉点的参考图像帧
-  updateReferencePatch(feat_map);
+  if(enable_vio)
+  {
+    updateReferencePatch(feat_map);
+  }
 
   double t7 = omp_get_wtime();
   
