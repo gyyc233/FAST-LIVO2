@@ -6,6 +6,7 @@
   - [imu 初始化](#imu-初始化)
   - [imu 误差状态矩阵计算与点云去畸变](#imu-误差状态矩阵计算与点云去畸变)
   - [重力方向对齐](#重力方向对齐)
+  - [使用LIO结果直接进行RGB染色](#使用lio结果直接进行rgb染色)
 
 # LIVO2流程解析
 
@@ -125,3 +126,11 @@ LIVO2 主流程
     _state.vel_end = G_R_I0 * _state.vel_end;
     _state.gravity = G_R_I0 * _state.gravity;
 ```
+
+## 使用LIO结果直接进行RGB染色
+
+使用的数据集是`CBD_Building_03`,左图是LIO+VIO结果，右图是LIO结果,可以观察到VIO对LIO结果进行了一些修正，使得图像精确度进一步提高
+
+<div align="center">
+    <img src="pics/my/using_lio_no_vio.png" width = 100% >
+</div>
