@@ -78,7 +78,7 @@ struct MeasureGroup
   };
 };
 
-// LiDAR 扫描帧数据结构
+// LiDAR 扫描帧+imu+image数据结构
 struct LidarMeasureGroup
 {
   double lidar_frame_beg_time; // 帧开始时间

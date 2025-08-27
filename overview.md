@@ -42,15 +42,41 @@ LIVO2 主流程
          1. VIO，组装lidar点云与imu数据（选择前后两帧lidar之间的imu），后`meas.lio_vio_flg = LIO;`，进入LIO分支
          2. LIO，组装图像帧数据,记录图像帧时间与上一次lio时间(`m.vio_time` `m.lio_time`)，后`meas.lio_vio_flg = VIO;`，进入VIO分支
       3. ONLY_LO，仅使用lidar数据
-   2. `LIVMapper::handleFirstFrame()` 首帧数据标志
-   3. `LIVMapper::processImu()` 对imu做ESKF真值状态量预测,对lidar点云做运动畸变矫正以及重力方向对齐
+
+lidar imu image 数据存储结构
+
+```cpp
+// LiDAR 扫描帧+imu+image数据结构
+struct LidarMeasureGroup
+{
+  double lidar_frame_beg_time; // 帧开始时间
+  double lidar_frame_end_time; // 帧结束时间
+  double last_lio_update_time; // 上一次 LIO 更新的时间戳
+  PointCloudXYZI::Ptr lidar; // 原始 LiDAR 点云数据
+  PointCloudXYZI::Ptr pcl_proc_cur; // 当前处理后的点云
+  PointCloudXYZI::Ptr pcl_proc_next; // 下一帧点云缓存
+  deque<struct MeasureGroup> measures; // 包含该 LiDAR 帧期间的所有 IMU 和图像数据组
+  EKF_STATE lio_vio_flg; //模式标志
+  int lidar_scan_index_now; // 当前 LiDAR 扫描帧索引
+
+   struct MeasureGroup
+   {
+     double vio_time; // 图像时间戳（VIO模式）
+     double lio_time; // LiDAR 时间戳（LIO 模式）
+     deque<sensor_msgs::Imu::ConstPtr> imu;
+     cv::Mat img;
+
+```
+
+   1. `LIVMapper::handleFirstFrame()` 首帧数据标志
+   2. `LIVMapper::processImu()` 对imu做ESKF真值状态量预测,对lidar点云做运动畸变矫正以及重力方向对齐
       1. `ImuProcess p_imu->Process2(LidarMeasures, _state, feats_undistort);` 计算imu误差状态系数矩阵更新 _state，并进行lidar点云去畸变
          1. `Forward_without_imu(lidar_meas, stat, *cur_pcl_un_);` 参考FAST-LIO 中的误差状态jacobian进行推导，如果没有imu数据则只对位姿与速度进行更新
          2. `ImuProcess::IMU_init` [imu静止初始化](#imu-初始化)
          3. `void ImuProcess::UndistortPcl` 参考FAST-LIO imu 误差状态转移方程 (ESKF)前向传播imu data(前向状态量预测积分),然后对lidar点云进行去畸变（后向传播）
       2. `gravityAlignment()` [重力方向对齐](#重力方向对齐)，原配置文件默认不执行，在imu初始化完成后执行一次
       3. 将前向传播，后向传播的结果（状态向量与去畸变点云）保存到 `voxelmap_manager->state_ = _state;voxelmap_manager->feats_undistort_ = feats_undistort;`
-   4. `LIVMapper::stateEstimationAndMapping() ` 基于`LidarMeasures.lio_vio_flg`执行LIO或者VIO流程
+   3. `LIVMapper::stateEstimationAndMapping() ` 基于`LidarMeasures.lio_vio_flg`执行LIO或者VIO流程
       1. [VIO->`LIVMapper::handleVIO()`](./handleVIO.md)
          1. VIO 需要等待 `pcl_w_wait_pub` 数据，它在handleLIO中添加数据，所以会先执行LIO
          2. `VIOManager::processFrame` VIO主要流程
@@ -61,7 +87,7 @@ LIVO2 主流程
          4. 基于更新后的状态量更新lidar点云
          5. 更新体素地图 `VoxelMapManager::UpdateVoxelMap(const std::vector<pointWithVar> &input_points)`
          6. 点云体素地图滑窗 `VoxelMapManager::mapSliding()` 当系统移动一定距离后，清理超出范围的体素地图数据，以保持地图在机器人周围的有效性并提升性能
-   5. LIVMapper::savePCD() 保存pcl点云与(optional)colmap点云 `source: pcl_wait_save`
+   4. LIVMapper::savePCD() 保存pcl点云与(optional)colmap点云 `source: pcl_wait_save`
 
 ## 点云预处理
 
