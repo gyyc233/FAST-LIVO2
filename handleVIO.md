@@ -71,10 +71,11 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
    1. 遍历`rays_with_sample_points`(这个是网格预采样点，里面是归一化坐标)光线投射采样点，保存采样点转世界坐标`sample_point_w`, 跳过在`sub_feat_map`中出现的点
    2. 在`feat_map`中查找，过程基本与上一步一致，找出对应图像网格中距离当前视觉图像帧最近的视觉特征点id并保存数据
    3. `feat_map`不存在上述目标, 则在`plane_map`lidar点云体素地图中搜索最接近`sample_point_w`的节点`current_octo`，若`current_octo`具有自己的平面模型,执行`visual_submap->add_from_voxel_map.push_back(plane_center);`, 用于在后续生成视觉地图点
-4. 筛选高质量视觉点，遍历所有网格
+4. 上述步骤重点是生成`retrieve_voxel_points`数组，里面记录了每个网格中最靠近当前相机帧的`Visual Point`,之前的深度一致性比较和ray_casting步骤都可以省略
+5. 筛选高质量视觉点，遍历所有网格
    1. 对于`grid_num[i] == TYPE_MAP`, 获取`VisualPoint *pt = retrieve_voxel_points[i]` 该网格中最靠近相机的视觉特征点,计算其相机坐标与像素坐标
       1. 计算该点从世界坐标系投影到相机坐标系下的深度`pt_cam[2]`与之前深度图(对应pitch中的所有像素)中的深度(这里的深度从lidar点云中得到)`depth`比较，观察深度一致性，保留前后深度一致的点继续下一步处理
-   2. 为该视觉特征点寻找最合适的参考图像参考帧
+   2. 为该视觉特征点寻找最合适的参考图像参考帧(选取具有最小平均光度误差的image patch作为pt的参考帧)
       1. 若启用法向量计算(默认启用)
          1. 遍历该视觉特征点(`每个网格中最靠近相机的 VisualPoint`)的所有观测数据`pt->obs_(Feature)`, 计算两两视角下图像块(`float*`)之间的光度误差`photometric error`, 选择最小光度误差视角(obs_中的feature)的图像块作为该视觉特征点(`VisualPoint pt`)的最佳参考帧(`feature`)`pt->ref_patch`
       2. 否则使用视角相似性`getCloseViewObs`（如角度差异和距离）来选择参考特征(选择最接近当前图像帧位姿的obs_位姿作为参考图像块)

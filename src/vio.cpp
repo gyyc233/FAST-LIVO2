@@ -721,7 +721,8 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
     if (grid_num[i] == TYPE_MAP)
     {
       // double t_1 = omp_get_wtime();
-
+      // TODO:上面的操作只是为了生成 retrieve_voxel_points 数组
+      // 深度图，ray_casting 筛选其实都可以省略
       VisualPoint *pt = retrieve_voxel_points[i]; // 该网格中最靠近相机的视觉特征点
       // visual_sub_map_cur.push_back(pt); // before
 
@@ -1899,8 +1900,8 @@ void VIOManager::updateState(cv::Mat img, int level)
 
           // 这里的p_hat感觉漏了一个负号,原仓库有讨论 https://github.com/hku-mars/FAST-LIVO2/issues/205
           // maybe: Jdphi = Jimg * Jdpi * (-1 * p_hat);
-          Jdphi = Jimg * Jdpi * p_hat; // 投影误差对相机归一化坐标的偏导
-          Jdp = -Jimg * Jdpi;
+          Jdphi = Jimg * Jdpi * p_hat; // 投影误差对相机归一化坐标的偏导，接着*p_hat以为着相机归一化坐标对相机坐标系坐标的偏导，用左扰动更新模型
+          Jdp = -Jimg * Jdpi; // 投影误差对相机归一化坐标的偏导
 
           // TODO: 观测误差对 IMU 状态的偏导，从投影空间映射到imu状态空间
           // 从相机空间再转回了imu空间，右乘了se3的右扰动更新项
