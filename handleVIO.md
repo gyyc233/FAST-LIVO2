@@ -143,7 +143,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
 
 jacobian矩阵只计算一次并没有伴随迭代更新计算
 
-- `precomputeReferencePatches()` 将视觉特征点放在它的参考图像观测帧下，计算它们的jacobian(这里已经计算了像素梯度), 结果保存在`H_sub_inv`
+- `precomputeReferencePatches()` 将视觉特征点放在它的参考图像观测帧下，计算它们的jacobian(这里已经计算了像素梯度), 结果保存在`H_sub_inv` `在IESKF中只计算一次，没有重复计算`
 
 在常规迭代中执行以下操作
 
@@ -209,7 +209,7 @@ jacobian矩阵只计算一次并没有伴随迭代更新计算
    1. 获取对应世界坐标点`pointWithVar pt_var = append_voxel_points[i]`，世界坐标`V3D pt = pt_var.point_w`, 转到当前图像帧相机,计算相机坐标(单位方向向量)`dir` 像素坐标`pc` 法向量`norm_vec`
    2. 计算方向向量与法向量的夹角余弦, 检查是否要反转法向量方向
    3. 提取以像素坐标 pc 为中心的图像块（8*8像素块大小的区域） patch，采用双线性插值方法处理亚像素精度
-   4. 基于世界坐标系下lisar点pt，创建视觉特征点对象`VisualPoint *pt_new = new VisualPoint(pt)`与它的观测帧`Feature *ftr_new`
+   4. 基于世界坐标系下lidar点pt，创建视觉特征点对象`VisualPoint *pt_new = new VisualPoint(pt)`与它的观测帧`Feature *ftr_new`
       1. 将观测帧加入该视觉特征点的观测历史`pt_new->addFrameRef(ftr_new)`
    5. 插入新视觉特征点到体素地图中`insertPointIntoVoxelMap(pt_new)`
 

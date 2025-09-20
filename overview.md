@@ -29,12 +29,13 @@ LIVO2 主流程
    1. lidar 点云回调
       1. [点云预处理](#点云预处理) `PreprocessPtr p_pre->process(msg, ptr);`, save to `lid_raw_data_buffer`(TODO:没有调用`Preprocess::give_feature`吗?)
    2. imu 回调
-      1. 检查imu与lidar时间对齐,ros_driver_fix_en 强制硬同步，保存在 `imu_buffer`, `prop_imu_buffer`
+      1. 检查imu与lidar时间对齐,ros_driver_fix_en 强制硬同步，保存在 `imu_buffer`, `prop_imu_buffer` `imu_buffer`会参与后面的imu ESKF
    3. image 回调，缓存至 `img_buffer`
    4. 定时器 imu_prop_callback 0.04秒触发一次：
       1. 等待imu初始化，完成一次imu前向传播(imu积分) `prop_imu_once(imu_propagate, dt, acc_imu, omg_imu)` 
       2. 若state_update_flg（该标志在handleVIO handleLIO 中使能），基于prop_imu_buffer 数据，进行[imu前向传播](#imu-单次状态更新) `prop_imu_once(imu_propagate, dt, acc_imu, omg_imu)`，否则只对newest_imu进行传播，更新imu
       3. 提取更新后的imu_propagate发布到 `/LIVO2/imu_propagate`
+      4. 这里对imu的积分只是用于向ros发布imu消息，没有参与到后面的imu ESKF
 2. LIVMapper::run() 
    1. `sync_packages()`，组装数据到`LidarMeasureGroup &meas`->`LidarMeasures`
       1. ONLY_LIO：同步lidar点云与imu数据, 组装数据`MeasureGroup m` 到 `LidarMeasureGroup &meas`,meas.lio_vio_flg = LIO; 
